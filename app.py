@@ -111,6 +111,9 @@ small_webrtc_handler = SmallWebRTCRequestHandler(ice_servers=ICE_SERVERS)
 # In-memory session store: session_id -> pipeline config dict
 active_sessions: Dict[str, Dict[str, Any]] = {}
 
+# Pipeline selected from dashboard (consumed by the next /start call)
+_next_pipeline: Dict[str, str] = {"pipeline_stt": "deepgram", "pipeline_tts": "openai"}
+
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
@@ -148,6 +151,19 @@ async def debug_ice():
         "server_ice_count": len(ICE_SERVERS),
         "client_ice_config": ICE_CONFIG_FOR_CLIENT,
     }
+
+
+@app.post("/set-pipeline")
+async def set_pipeline(request: Request):
+    """Called by the dashboard before opening the prebuilt client."""
+    global _next_pipeline
+    data = await request.json()
+    _next_pipeline = {
+        "pipeline_stt": data.get("stt", "deepgram"),
+        "pipeline_tts": data.get("tts", "openai"),
+    }
+    logger.info(f"Pipeline selected: {_next_pipeline}")
+    return {"status": "ok", "pipeline": _next_pipeline}
 
 
 # ---------------------------------------------------------------------------
@@ -194,17 +210,20 @@ async def rtvi_start(request: Request):
         request_data = {}
 
     session_id = str(uuid.uuid4())
-    # Store pipeline config from client (pipeline_stt, pipeline_tts)
-    active_sessions[session_id] = request_data.get("body", {})
+
+    # Pipeline comes from: request body (custom dashboard) > dashboard selection > defaults
+    body = request_data.get("body") or {}
+    if not body.get("pipeline_stt"):
+        body = dict(_next_pipeline)
+    active_sessions[session_id] = body
 
     result = {"sessionId": session_id}
     if request_data.get("enableDefaultIceServers") or ICE_CONFIG_FOR_CLIENT["iceServers"]:
         result["iceConfig"] = ICE_CONFIG_FOR_CLIENT
 
-    pipeline_cfg = active_sessions[session_id]
     logger.info(
         f"POST /start -> session={session_id}, "
-        f"pipeline={pipeline_cfg.get('pipeline_stt', 'deepgram')}+{pipeline_cfg.get('pipeline_tts', 'openai')}"
+        f"pipeline={body.get('pipeline_stt', 'deepgram')}+{body.get('pipeline_tts', 'openai')}"
     )
     return result
 
