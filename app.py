@@ -238,7 +238,12 @@ async def proxy_request(
                 patch_request = SmallWebRTCPatchRequest(
                     pc_id=request_data["pc_id"],
                     candidates=[
-                        IceCandidate(**c) for c in request_data.get("candidates", [])
+                        IceCandidate(
+                            candidate=c["candidate"],
+                            sdp_mid=c.get("sdpMid", c.get("sdp_mid", "")),
+                            sdp_mline_index=c.get("sdpMLineIndex", c.get("sdp_mline_index", 0)),
+                        )
+                        for c in request_data.get("candidates", [])
                     ],
                 )
                 return await ice_candidate(patch_request)
@@ -250,9 +255,15 @@ async def proxy_request(
 
 
 # ---------------------------------------------------------------------------
-# Static dashboard (must be mounted AFTER API routes)
+# Static files (must be mounted AFTER API routes)
 # ---------------------------------------------------------------------------
 
+# Mount the prebuilt WebRTC client (agent metrics, etc.) at /client
+from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
+
+app.mount("/client", SmallWebRTCPrebuiltUI)
+
+# Mount custom dashboard at /
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
