@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Agent - Pipeline Comparison</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a; color: #e2e8f0; min-height: 100vh;
+        }
+        .header {
+            background: #1e293b; padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid #334155; text-align: center;
+        }
+        .header h1 { font-size: 1.4rem; color: #f1f5f9; }
+        .header p { font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem; }
+        .mic-banner {
+            background: #1e3a5f; padding: 0.75rem; text-align: center;
+            font-size: 0.85rem; color: #93c5fd; display: none;
+        }
+        .mic-banner.error { background: #5f1e1e; color: #fca5a5; }
+        .grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 1rem; padding: 1rem; max-width: 1200px; margin: 0 auto;
+        }
+        .card {
+            background: #1e293b; border-radius: 12px; padding: 1.25rem;
+            border: 1px solid #334155; transition: border-color 0.3s;
+        }
+        .card.active { border-color: #3b82f6; }
+        .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem; }
+        .card h2 { font-size: 1rem; color: #f1f5f9; }
+        .badges { display: flex; gap: 0.4rem; margin-top: 0.35rem; }
+        .badge {
+            font-size: 0.65rem; padding: 0.15rem 0.5rem; border-radius: 9999px;
+            font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em;
+        }
+        .badge-stt { background: #1e3a5f; color: #93c5fd; }
+        .badge-tts { background: #3b1f5e; color: #c4b5fd; }
+        .status-row {
+            display: flex; align-items: center; gap: 0.5rem;
+            margin-bottom: 1rem; font-size: 0.85rem; color: #94a3b8;
+        }
+        .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #475569; flex-shrink: 0;
+        }
+        .dot.connected { background: #22c55e; }
+        .dot.connecting { background: #eab308; animation: pulse 1s infinite; }
+        .dot.failed { background: #ef4444; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .controls { display: flex; gap: 0.5rem; }
+        .btn {
+            padding: 0.5rem 1.1rem; border-radius: 8px; border: none;
+            cursor: pointer; font-size: 0.8rem; font-weight: 600;
+            transition: all 0.15s;
+        }
+        .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .btn-connect { background: #3b82f6; color: #fff; }
+        .btn-connect:hover:not(:disabled) { background: #2563eb; }
+        .btn-disconnect { background: #374151; color: #e2e8f0; }
+        .btn-disconnect:hover:not(:disabled) { background: #ef4444; color: #fff; }
+        .log {
+            margin-top: 0.75rem; font-size: 0.7rem; color: #64748b;
+            max-height: 90px; overflow-y: auto; font-family: 'SF Mono', Monaco, Consolas, monospace;
+            background: #0f172a; border-radius: 6px; padding: 0.5rem;
+        }
+        .log div { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .log .err { color: #fca5a5; }
+        .log .ok { color: #86efac; }
+        @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Loan Collection Agent &mdash; Pipeline Comparison</h1>
+        <p>Compare STT and TTS combinations in real time. Connect to any panel and speak.</p>
+    </div>
+    <div class="mic-banner" id="mic-banner"></div>
+    <div class="grid" id="grid"></div>
+
+    <script>
+    // -----------------------------------------------------------------------
+    // Pipeline definitions
+    // -----------------------------------------------------------------------
+    const PIPELINES = [
+        { stt: 'deepgram', tts: 'openai',  label: 'Deepgram + OpenAI TTS' },
+        { stt: 'deepgram', tts: 'edge',    label: 'Deepgram + Edge TTS' },
+        { stt: 'whisper',  tts: 'openai',  label: 'Whisper + OpenAI TTS' },
+        { stt: 'whisper',  tts: 'edge',    label: 'Whisper + Edge TTS' },
+    ];
+
+    // Shared mic stream (requested once, reused for all panels)
+    let sharedMicStream = null;
+
+    async function getMicStream() {
+        if (sharedMicStream) return sharedMicStream;
+        sharedMicStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        });
+        return sharedMicStream;
+    }
+
+    // -----------------------------------------------------------------------
+    // VoiceConnection - handles one WebRTC session to the server
+    // -----------------------------------------------------------------------
+    class VoiceConnection {
+        constructor(stt, tts, panel) {
+            this.stt = stt;
+            this.tts = tts;
+            this.panel = panel;
+            this.pc = null;
+            this.sessionId = null;
+            this.pcId = null;
+        }
+
+        log(msg, cls) {
+            const el = this.panel.querySelector('.log');
+            const d = document.createElement('div');
+            if (cls) d.className = cls;
+            d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            el.appendChild(d);
+            el.scrollTop = el.scrollHeight;
+        }
+
+        setStatus(state, text) {
+            const dot = this.panel.querySelector('.dot');
+            const label = this.panel.querySelector('.status-text');
+            dot.className = 'dot ' + state;
+            label.textContent = text || state;
+            this.panel.classList.toggle('active', state === 'connected' || state === 'connecting');
+        }
+
+        async connect() {
+            const connectBtn = this.panel.querySelector('.btn-connect');
+            const disconnectBtn = this.panel.querySelector('.btn-disconnect');
+            connectBtn.disabled = true;
+
+            try {
+                // 1. Request mic
+                this.setStatus('connecting', 'Requesting microphone...');
+                this.log('Requesting microphone access...');
+                const mic = await getMicStream();
+                showMicBanner('Microphone active', false);
+                this.log('Microphone ready', 'ok');
+
+                // 2. Start session
+                this.setStatus('connecting', 'Starting session...');
+                this.log(`Starting session (${this.stt}+${this.tts})...`);
+                const startRes = await fetch('/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        enableDefaultIceServers: true,
+                        body: { pipeline_stt: this.stt, pipeline_tts: this.tts },
+                    }),
+                });
+                if (!startRes.ok) throw new Error(`/start returned ${startRes.status}`);
+                const startData = await startRes.json();
+                this.sessionId = startData.sessionId;
+                const iceConfig = startData.iceConfig || { iceServers: [] };
+                this.log(`Session: ${this.sessionId.slice(0, 8)}... (${iceConfig.iceServers.length} ICE servers)`);
+
+                // 3. Create PeerConnection
+                this.pc = new RTCPeerConnection(iceConfig);
+
+                // Queue ICE candidates until we have pcId
+                const pendingCandidates = [];
+                this.pc.onicecandidate = (e) => {
+                    if (!e.candidate) return;
+                    const c = {
+                        candidate: e.candidate.candidate,
+                        sdpMid: e.candidate.sdpMid,
+                        sdpMLineIndex: e.candidate.sdpMLineIndex,
+                    };
+                    if (this.pcId) {
+                        this._sendCandidates([c]);
+                    } else {
+                        pendingCandidates.push(c);
+                    }
+                };
+
+                // Handle remote audio
+                this.pc.ontrack = (e) => {
+                    this.log('Receiving bot audio', 'ok');
+                    const audio = this.panel.querySelector('audio');
+                    audio.srcObject = e.streams[0];
+                    audio.play().catch(() => {});
+                };
+
+                // Connection state
+                this.pc.onconnectionstatechange = () => {
+                    const s = this.pc.connectionState;
+                    this.log(`Connection: ${s}`);
+                    if (s === 'connected') {
+                        this.setStatus('connected', 'Connected');
+                        disconnectBtn.disabled = false;
+                    } else if (s === 'failed' || s === 'closed') {
+                        this.setStatus('failed', s === 'closed' ? 'Disconnected' : 'Failed');
+                        this._cleanup();
+                        connectBtn.disabled = false;
+                        disconnectBtn.disabled = true;
+                    } else if (s === 'connecting') {
+                        this.setStatus('connecting', 'Connecting...');
+                    }
+                };
+
+                // 4. Add mic tracks
+                mic.getAudioTracks().forEach(t => {
+                    this.pc.addTrack(t, mic);
+                });
+
+                // 5. Create and send offer
+                this.setStatus('connecting', 'Negotiating WebRTC...');
+                const offer = await this.pc.createOffer();
+                await this.pc.setLocalDescription(offer);
+                this.log('Sending SDP offer...');
+
+                const offerRes = await fetch(`/sessions/${this.sessionId}/api/offer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sdp: this.pc.localDescription.sdp,
+                        type: this.pc.localDescription.type,
+                    }),
+                });
+                if (!offerRes.ok) throw new Error(`Offer returned ${offerRes.status}`);
+                const answer = await offerRes.json();
+                this.pcId = answer.pc_id;
+                this.log('SDP answer received', 'ok');
+
+                // 6. Set remote description
+                await this.pc.setRemoteDescription(new RTCSessionDescription({
+                    sdp: answer.sdp,
+                    type: answer.type,
+                }));
+
+                // 7. Flush queued candidates
+                if (pendingCandidates.length > 0) {
+                    this._sendCandidates(pendingCandidates.splice(0));
+                }
+
+                disconnectBtn.disabled = false;
+
+            } catch (err) {
+                this.log(`Error: ${err.message}`, 'err');
+                this.setStatus('failed', 'Error');
+                if (err.name === 'NotAllowedError') {
+                    showMicBanner('Microphone access denied. Please allow microphone and retry.', true);
+                }
+                this._cleanup();
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        disconnect() {
+            this.log('Disconnecting...');
+            this._cleanup();
+            this.setStatus('', 'Disconnected');
+            const connectBtn = this.panel.querySelector('.btn-connect');
+            const disconnectBtn = this.panel.querySelector('.btn-disconnect');
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+        }
+
+        _cleanup() {
+            if (this.pc) {
+                this.pc.close();
+                this.pc = null;
+            }
+            this.sessionId = null;
+            this.pcId = null;
+            const audio = this.panel.querySelector('audio');
+            if (audio.srcObject) {
+                audio.srcObject = null;
+            }
+        }
+
+        async _sendCandidates(candidates) {
+            if (!this.pcId || !this.sessionId || candidates.length === 0) return;
+            try {
+                await fetch(`/sessions/${this.sessionId}/api/offer`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pc_id: this.pcId, candidates }),
+                });
+            } catch (e) {
+                this.log(`ICE send error: ${e.message}`, 'err');
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // UI helpers
+    // -----------------------------------------------------------------------
+    function showMicBanner(msg, isError) {
+        const b = document.getElementById('mic-banner');
+        b.textContent = msg;
+        b.className = 'mic-banner' + (isError ? ' error' : '');
+        b.style.display = 'block';
+    }
+
+    // -----------------------------------------------------------------------
+    // Build dashboard cards
+    // -----------------------------------------------------------------------
+    const grid = document.getElementById('grid');
+    const connections = [];
+
+    PIPELINES.forEach((p, i) => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+            <div class="card-header">
+                <div>
+                    <h2>${p.label}</h2>
+                    <div class="badges">
+                        <span class="badge badge-stt">STT: ${p.stt}</span>
+                        <span class="badge badge-tts">TTS: ${p.tts}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="status-row">
+                <span class="dot"></span>
+                <span class="status-text">Disconnected</span>
+            </div>
+            <div class="controls">
+                <button class="btn btn-connect">Connect</button>
+                <button class="btn btn-disconnect" disabled>Disconnect</button>
+            </div>
+            <audio autoplay playsinline></audio>
+            <div class="log"></div>
+        `;
+        grid.appendChild(card);
+
+        const conn = new VoiceConnection(p.stt, p.tts, card);
+        connections.push(conn);
+
+        card.querySelector('.btn-connect').addEventListener('click', () => conn.connect());
+        card.querySelector('.btn-disconnect').addEventListener('click', () => conn.disconnect());
+    });
+    </script>
+</body>
+</html>
