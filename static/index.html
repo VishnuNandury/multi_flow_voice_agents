@@ -16,6 +16,13 @@
         }
         .header h1 { font-size: 1.4rem; color: #f1f5f9; }
         .header p { font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem; }
+        .header-link {
+            display: inline-block; margin-top: 0.6rem;
+            font-size: 0.8rem; color: #60a5fa; text-decoration: none;
+            border: 1px solid #3b82f6; border-radius: 6px;
+            padding: 0.3rem 0.75rem; transition: all 0.15s;
+        }
+        .header-link:hover { background: #3b82f6; color: #fff; }
         .mic-banner {
             background: #1e3a5f; padding: 0.75rem; text-align: center;
             font-size: 0.85rem; color: #93c5fd; display: none;
@@ -77,6 +84,7 @@
     <div class="header">
         <h1>Loan Collection Agent &mdash; Pipeline Comparison</h1>
         <p>Compare STT and TTS combinations in real time. Connect to any panel and speak.</p>
+        <a class="header-link" href="/client/" target="_blank">Open Prebuilt Client (Agent Analytics)</a>
     </div>
     <div class="mic-banner" id="mic-banner"></div>
     <div class="grid" id="grid"></div>
