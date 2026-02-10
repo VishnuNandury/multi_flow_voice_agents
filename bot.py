@@ -132,14 +132,15 @@ def create_stt(stt_type: str):
         return OpenAISTTService(
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o-transcribe",
-            language=None,
+            language=os.getenv("STT_LANGUAGE", "hi"),
+            prompt="This is a Hindi and English (Hinglish) phone conversation about loan collection.",
         )
     else:
-        logger.info("STT: Deepgram Nova-3 (multilingual)")
+        logger.info("STT: Deepgram Nova-3 (Hindi)")
         return DeepgramSTTService(
             api_key=os.getenv("DEEPGRAM_API_KEY"),
             model=os.getenv("DEEPGRAM_MODEL", "nova-3"),
-            language=os.getenv("DEEPGRAM_LANGUAGE", "multi"),
+            language=os.getenv("DEEPGRAM_LANGUAGE", "hi"),
         )
 
 
@@ -151,10 +152,15 @@ def create_tts(tts_type: str):
             rate=os.getenv("EDGE_TTS_RATE", "+0%"),
         )
     else:
-        logger.info("TTS: OpenAI TTS")
+        logger.info("TTS: OpenAI TTS (shimmer)")
         return OpenAITTSService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            voice=os.getenv("OPENAI_TTS_VOICE", "alloy"),
+            voice=os.getenv("OPENAI_TTS_VOICE", "shimmer"),
+            instructions=(
+                "You are Priya, a warm and professional Indian woman speaking on a phone call. "
+                "Speak naturally in Hindi and Hinglish with clear pronunciation. "
+                "Use a conversational, friendly tone. Do not rush."
+            ),
         )
 
 
@@ -187,7 +193,10 @@ async def run_bot(transport: BaseTransport, _runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(
-                params=VADParams(stop_secs=0.5)
+                params=VADParams(
+                    stop_secs=0.8,
+                    min_volume=0.5,
+                )
             ),
         ),
     )
@@ -241,14 +250,20 @@ async def run_bot(transport: BaseTransport, _runner_args: RunnerArguments):
 transport_params = {
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
+        audio_in_sample_rate=16000,
         audio_out_enabled=True,
+        audio_out_sample_rate=24000,
+        audio_out_bitrate=96000,
     ),
 }
 
 if DailyParams is not None:
     transport_params["daily"] = lambda: DailyParams(
         audio_in_enabled=True,
+        audio_in_sample_rate=16000,
         audio_out_enabled=True,
+        audio_out_sample_rate=24000,
+        audio_out_bitrate=96000,
     )
 
 
