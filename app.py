@@ -152,6 +152,26 @@ async def debug_ice():
         "client_ice_config": ICE_CONFIG_FOR_CLIENT,
     }
 
+##added
+@app.get("/debug/audio-config")
+async def debug_audio_config():
+    """Debug endpoint to check audio configuration."""
+    return {
+        "edge_tts": {
+            "sample_rate": 24000,
+            "voice": os.getenv("EDGE_TTS_VOICE", "hi-IN-SwaraNeural"),
+            "rate": os.getenv("EDGE_TTS_RATE", "+0%"),
+        },
+        "deepgram_stt": {
+            "model": os.getenv("DEEPGRAM_MODEL", "nova-3"),
+            "language": os.getenv("DEEPGRAM_LANGUAGE", "hi"),
+        },
+        "openai": {
+            "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
+            "tts_voice": os.getenv("OPENAI_TTS_VOICE", "shimmer"),
+        },
+    }
+
 
 @app.post("/set-pipeline")
 async def set_pipeline(request: Request):
@@ -170,14 +190,42 @@ async def set_pipeline(request: Request):
 # WebRTC signaling routes
 # ---------------------------------------------------------------------------
 
+# @app.post("/api/offer")
+# async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
+#     from pipecat.runner.types import SmallWebRTCRunnerArguments
+
+#     logger.info(f"POST /api/offer (direct)")
+
+#     async def webrtc_connection_callback(connection: SmallWebRTCConnection):
+#         logger.info("WebRTC connection established, starting bot pipeline")
+#         runner_args = SmallWebRTCRunnerArguments(
+#             webrtc_connection=connection,
+#             body=request.request_data,
+#         )
+#         background_tasks.add_task(bot_module.bot, runner_args)
+
+#     try:
+#         answer = await small_webrtc_handler.handle_web_request(
+#             request=request,
+#             webrtc_connection_callback=webrtc_connection_callback,
+#         )
+#         logger.info("SDP answer generated successfully")
+#         return answer
+#     except Exception as e:
+#         logger.error(f"Error handling WebRTC offer: {e}", exc_info=True)
+#         raise
 @app.post("/api/offer")
 async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
     from pipecat.runner.types import SmallWebRTCRunnerArguments
 
-    logger.info(f"POST /api/offer (direct)")
+    # Add this logging
+    pipeline_config = request.request_data or {}
+    stt = pipeline_config.get("pipeline_stt", "deepgram")
+    tts = pipeline_config.get("pipeline_tts", "openai")
+    logger.info(f"POST /api/offer - Pipeline: STT={stt}, TTS={tts}")
 
     async def webrtc_connection_callback(connection: SmallWebRTCConnection):
-        logger.info("WebRTC connection established, starting bot pipeline")
+        logger.info(f"WebRTC connection established (STT={stt}, TTS={tts})")
         runner_args = SmallWebRTCRunnerArguments(
             webrtc_connection=connection,
             body=request.request_data,
@@ -189,12 +237,11 @@ async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
             request=request,
             webrtc_connection_callback=webrtc_connection_callback,
         )
-        logger.info("SDP answer generated successfully")
+        logger.info(f"SDP answer generated successfully for {stt}+{tts}")
         return answer
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}", exc_info=True)
         raise
-
 
 @app.patch("/api/offer")
 async def ice_candidate(request: SmallWebRTCPatchRequest):
