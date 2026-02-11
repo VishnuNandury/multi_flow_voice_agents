@@ -176,7 +176,7 @@ class EdgeTTSService(TTSService):
         container.close()
         return b"".join(pcm_chunks)
     
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, *args, **kwargs) -> AsyncGenerator[Frame, None]:
         logger.debug(f"EdgeTTS: Generating [{text[:50]}...]")
         
         try:
