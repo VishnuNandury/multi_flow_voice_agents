@@ -69,12 +69,100 @@
             font-size: 0.8rem; font-weight: 500; transition: all 0.15s;
         }
         .btn-back:hover { background: #334155; color: #f1f5f9; }
+
+        /* ---- Flow Steps Bar ---- */
+        .flow-bar {
+            background: #1e293b; padding: 0.65rem 1rem;
+            border-bottom: 1px solid #334155; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            gap: 0; overflow-x: auto;
+        }
+        .flow-step {
+            display: flex; align-items: center; gap: 0;
+            white-space: nowrap;
+        }
+        .flow-dot {
+            width: 26px; height: 26px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.6rem; font-weight: 700;
+            border: 2px solid #475569; background: transparent;
+            color: #64748b; transition: all 0.3s;
+            flex-shrink: 0;
+        }
+        .flow-dot.active {
+            border-color: #3b82f6; background: #3b82f6; color: #fff;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+        }
+        .flow-dot.done {
+            border-color: #22c55e; background: #22c55e; color: #fff;
+        }
+        .flow-label {
+            font-size: 0.62rem; color: #64748b; margin-left: 0.3rem;
+            margin-right: 0.4rem; transition: color 0.3s;
+        }
+        .flow-label.active { color: #93c5fd; font-weight: 600; }
+        .flow-label.done { color: #86efac; }
+        .flow-connector {
+            width: 20px; height: 2px; background: #334155;
+            margin: 0 0.1rem; flex-shrink: 0;
+            transition: background 0.3s;
+        }
+        .flow-connector.done { background: #22c55e; }
+
+        /* ---- Main Content (iframe + transcript) ---- */
+        .client-main {
+            flex: 1; display: flex; overflow: hidden;
+        }
         #client-iframe {
-            flex: 1; border: none; width: 100%; background: #0f172a;
+            flex: 1; border: none; background: #0f172a;
+            min-width: 0;
+        }
+        .transcript-panel {
+            width: 340px; background: #1e293b; border-left: 1px solid #334155;
+            display: flex; flex-direction: column; flex-shrink: 0;
+        }
+        .transcript-header {
+            padding: 0.6rem 0.75rem; font-size: 0.75rem; font-weight: 600;
+            color: #94a3b8; border-bottom: 1px solid #334155;
+            text-transform: uppercase; letter-spacing: 0.05em;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .transcript-duration {
+            font-size: 0.7rem; color: #64748b; font-weight: 400;
+            font-variant-numeric: tabular-nums;
+        }
+        .transcript-body {
+            flex: 1; overflow-y: auto; padding: 0.5rem;
+        }
+        .transcript-msg {
+            margin-bottom: 0.5rem; padding: 0.45rem 0.6rem;
+            border-radius: 8px; font-size: 0.76rem; line-height: 1.4;
+            max-width: 95%;
+        }
+        .transcript-msg.user {
+            background: #1e3a5f; color: #bfdbfe; margin-left: auto;
+            border-bottom-right-radius: 2px;
+        }
+        .transcript-msg.assistant {
+            background: #334155; color: #e2e8f0;
+            border-bottom-left-radius: 2px;
+        }
+        .transcript-role {
+            font-size: 0.58rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.05em; margin-bottom: 0.15rem;
+            color: #64748b;
+        }
+        .transcript-empty {
+            color: #475569; font-size: 0.78rem; text-align: center;
+            padding: 2rem 1rem;
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 900px) {
             .grid { grid-template-columns: 1fr; padding: 0.75rem; }
+            .transcript-panel { width: 280px; }
+        }
+        @media (max-width: 640px) {
+            .transcript-panel { display: none; }
         }
     </style>
 </head>
@@ -83,12 +171,12 @@
     <div id="dashboard-view">
         <div class="header">
             <h1>Loan Collection Agent &mdash; Pipeline Comparison</h1>
-            <p>Select a pipeline to start a voice conversation with the agent.</p>
+            <p>Select a pipeline to start a voice conversation. Flow stages are tracked in real-time.</p>
         </div>
         <div class="grid" id="grid"></div>
     </div>
 
-    <!-- Client: full-screen prebuilt UI with back bar -->
+    <!-- Client: full-screen prebuilt UI with flow tracking -->
     <div id="client-view">
         <div class="client-bar">
             <div class="client-bar-info">
@@ -98,7 +186,23 @@
             </div>
             <button class="btn-back" onclick="backToDashboard()">Back to Dashboard</button>
         </div>
-        <iframe id="client-iframe" src="about:blank" allow="microphone"></iframe>
+
+        <!-- Flow Steps Visualization -->
+        <div class="flow-bar" id="flow-bar"></div>
+
+        <!-- Main: iframe + transcript -->
+        <div class="client-main">
+            <iframe id="client-iframe" src="about:blank" allow="microphone"></iframe>
+            <div class="transcript-panel">
+                <div class="transcript-header">
+                    <span>Live Transcript</span>
+                    <span class="transcript-duration" id="duration-display"></span>
+                </div>
+                <div class="transcript-body" id="transcript-body">
+                    <div class="transcript-empty">Transcript will appear once the conversation starts...</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -106,7 +210,7 @@
         {
             stt: 'deepgram', tts: 'openai',
             label: 'Deepgram + OpenAI TTS',
-            desc: 'Streaming STT via Deepgram Nova-3 (multilingual) with OpenAI TTS voice synthesis.',
+            desc: 'Streaming STT via Deepgram Nova-3 with OpenAI TTS voice synthesis. Best overall quality.',
         },
         {
             stt: 'deepgram', tts: 'edge',
@@ -125,7 +229,21 @@
         },
     ];
 
-    // ---- Build cards ----
+    // Flow node definitions (synced with bot.py FLOW_NODES)
+    const FLOW_NODES = [
+        { id: 'greeting', label: 'Greeting' },
+        { id: 'overdue_info', label: 'Overdue Info' },
+        { id: 'understand_situation', label: 'Situation' },
+        { id: 'payment_options', label: 'Options' },
+        { id: 'commitment', label: 'Commitment' },
+        { id: 'promise_to_pay', label: 'PTP' },
+        { id: 'end', label: 'Complete' },
+    ];
+
+    let pollInterval = null;
+    let lastTranscriptLen = 0;
+
+    // ---- Build pipeline cards ----
     const grid = document.getElementById('grid');
 
     PIPELINES.forEach(p => {
@@ -147,9 +265,127 @@
         });
     });
 
+    // ---- Build flow steps bar ----
+    function buildFlowBar() {
+        const bar = document.getElementById('flow-bar');
+        bar.innerHTML = '';
+        FLOW_NODES.forEach((node, i) => {
+            const step = document.createElement('div');
+            step.className = 'flow-step';
+
+            const dot = document.createElement('div');
+            dot.className = 'flow-dot';
+            dot.id = `flow-dot-${node.id}`;
+            dot.textContent = i + 1;
+
+            const label = document.createElement('span');
+            label.className = 'flow-label';
+            label.id = `flow-label-${node.id}`;
+            label.textContent = node.label;
+
+            step.appendChild(dot);
+            step.appendChild(label);
+            bar.appendChild(step);
+
+            if (i < FLOW_NODES.length - 1) {
+                const connector = document.createElement('div');
+                connector.className = 'flow-connector';
+                connector.id = `flow-conn-${i}`;
+                bar.appendChild(connector);
+            }
+        });
+    }
+
+    function updateFlowState(currentNode) {
+        if (!currentNode) return;
+
+        const currentIdx = FLOW_NODES.findIndex(n => n.id === currentNode);
+        if (currentIdx === -1) return;
+
+        FLOW_NODES.forEach((node, i) => {
+            const dot = document.getElementById(`flow-dot-${node.id}`);
+            const label = document.getElementById(`flow-label-${node.id}`);
+            if (!dot || !label) return;
+
+            dot.classList.remove('active', 'done');
+            label.classList.remove('active', 'done');
+
+            if (i < currentIdx) {
+                dot.classList.add('done');
+                label.classList.add('done');
+            } else if (i === currentIdx) {
+                dot.classList.add('active');
+                label.classList.add('active');
+            }
+
+            if (i < FLOW_NODES.length - 1) {
+                const conn = document.getElementById(`flow-conn-${i}`);
+                if (conn) {
+                    conn.classList.toggle('done', i < currentIdx);
+                }
+            }
+        });
+    }
+
+    function updateTranscript(transcript) {
+        if (!transcript || transcript.length === 0) return;
+        if (transcript.length === lastTranscriptLen) return;
+
+        const body = document.getElementById('transcript-body');
+
+        // Clear placeholder on first message
+        if (lastTranscriptLen === 0) {
+            body.innerHTML = '';
+        }
+
+        // Append only new messages
+        for (let i = lastTranscriptLen; i < transcript.length; i++) {
+            const msg = transcript[i];
+            const div = document.createElement('div');
+            div.className = `transcript-msg ${msg.role}`;
+
+            const roleLabel = document.createElement('div');
+            roleLabel.className = 'transcript-role';
+            roleLabel.textContent = msg.role === 'user' ? 'Customer' : 'Priya (Agent)';
+
+            const text = document.createElement('div');
+            text.textContent = msg.text;
+
+            div.appendChild(roleLabel);
+            div.appendChild(text);
+            body.appendChild(div);
+        }
+
+        lastTranscriptLen = transcript.length;
+        body.scrollTop = body.scrollHeight;
+    }
+
+    function updateDuration(seconds) {
+        if (!seconds || seconds < 0) return;
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        const display = document.getElementById('duration-display');
+        if (display) {
+            display.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+    }
+
+    // ---- Poll for flow state and transcript ----
+    async function pollFlowState() {
+        try {
+            const res = await fetch('/api/active-flow');
+            if (!res.ok) return;
+            const data = await res.json();
+            updateFlowState(data.current_node);
+            updateTranscript(data.transcript || []);
+            updateDuration(data.duration);
+        } catch (e) {
+            // Silently ignore polling errors
+        }
+    }
+
     // ---- Pipeline selection & client view ----
     async function openPipeline(p) {
-        // Tell the server which pipeline the next /start should use
         try {
             const res = await fetch('/set-pipeline', {
                 method: 'POST',
@@ -167,18 +403,38 @@
         document.getElementById('active-stt').textContent = 'STT: ' + p.stt;
         document.getElementById('active-tts').textContent = 'TTS: ' + p.tts;
 
+        // Build flow steps & reset transcript
+        buildFlowBar();
+        lastTranscriptLen = 0;
+        document.getElementById('transcript-body').innerHTML =
+            '<div class="transcript-empty">Transcript will appear once the conversation starts...</div>';
+        document.getElementById('duration-display').textContent = '';
+
         // Switch views
         document.getElementById('dashboard-view').style.display = 'none';
         document.getElementById('client-view').style.display = 'flex';
 
-        // Load the prebuilt client (it will call /start which picks up our pipeline)
+        // Load the prebuilt client (it calls /start which picks up our pipeline)
         document.getElementById('client-iframe').src = '/client/';
+
+        // Start polling for flow state
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(pollFlowState, 1000);
     }
 
     function backToDashboard() {
+        // Stop polling
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+
         // Tear down the iframe (disconnects WebRTC)
         const iframe = document.getElementById('client-iframe');
         iframe.src = 'about:blank';
+
+        // Reset state
+        lastTranscriptLen = 0;
 
         // Switch views
         document.getElementById('client-view').style.display = 'none';

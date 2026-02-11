@@ -8,6 +8,7 @@
 
 import os
 import sys
+import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
@@ -190,54 +191,23 @@ async def set_pipeline(request: Request):
 # WebRTC signaling routes
 # ---------------------------------------------------------------------------
 
-# @app.post("/api/offer")
-# async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
-#     from pipecat.runner.types import SmallWebRTCRunnerArguments
-
-#     logger.info(f"POST /api/offer (direct)")
-
-#     async def webrtc_connection_callback(connection: SmallWebRTCConnection):
-#         logger.info("WebRTC connection established, starting bot pipeline")
-#         runner_args = SmallWebRTCRunnerArguments(
-#             webrtc_connection=connection,
-#             body=request.request_data,
-#         )
-#         background_tasks.add_task(bot_module.bot, runner_args)
-
-#     try:
-#         answer = await small_webrtc_handler.handle_web_request(
-#             request=request,
-#             webrtc_connection_callback=webrtc_connection_callback,
-#         )
-#         logger.info("SDP answer generated successfully")
-#         return answer
-#     except Exception as e:
-#         logger.error(f"Error handling WebRTC offer: {e}", exc_info=True)
-#         raise
 @app.post("/api/offer")
 async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
-    from pipecat.runner.types import SmallWebRTCRunnerArguments
-
-    # Add this logging
     pipeline_config = request.request_data or {}
-    stt = pipeline_config.get("pipeline_stt", "deepgram")
-    tts = pipeline_config.get("pipeline_tts", "openai")
+    stt = pipeline_config.get("pipeline_stt", _next_pipeline.get("pipeline_stt", "deepgram"))
+    tts = pipeline_config.get("pipeline_tts", _next_pipeline.get("pipeline_tts", "openai"))
     logger.info(f"POST /api/offer - Pipeline: STT={stt}, TTS={tts}")
 
     async def webrtc_connection_callback(connection: SmallWebRTCConnection):
         logger.info(f"WebRTC connection established (STT={stt}, TTS={tts})")
-        runner_args = SmallWebRTCRunnerArguments(
-            webrtc_connection=connection,
-            body=request.request_data,
-        )
-        background_tasks.add_task(bot_module.bot, runner_args)
+        background_tasks.add_task(bot_module.run_bot, connection, stt, tts)
 
     try:
         answer = await small_webrtc_handler.handle_web_request(
             request=request,
             webrtc_connection_callback=webrtc_connection_callback,
         )
-        logger.info(f"SDP answer generated successfully for {stt}+{tts}")
+        logger.info(f"SDP answer generated for {stt}+{tts}")
         return answer
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}", exc_info=True)
@@ -318,6 +288,31 @@ async def proxy_request(
             return Response(content="Invalid request", status_code=400)
 
     return Response(status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Flow state API (polled by the dashboard for real-time visualization)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/active-flow")
+async def get_active_flow():
+    """Return flow state and transcript for the current active session."""
+    for pc_id, data in bot_module.session_data.items():
+        return {
+            "current_node": data.get("current_node"),
+            "flow_nodes": bot_module.FLOW_NODES,
+            "transcript": data.get("transcript", []),
+            "stt_type": data.get("stt_type"),
+            "tts_type": data.get("tts_type"),
+            "duration": time.time() - data.get("start_time", time.time()),
+        }
+    return {"current_node": None, "flow_nodes": bot_module.FLOW_NODES, "transcript": []}
+
+
+@app.get("/api/flow-nodes")
+async def get_flow_nodes():
+    """Return the list of flow node definitions."""
+    return bot_module.FLOW_NODES
 
 
 # ---------------------------------------------------------------------------
