@@ -4,6 +4,9 @@ pipecat-ai[deepgram,openai,silero,webrtc]>=0.0.101
 # Pipecat Flows (structured conversation flows)
 pipecat-ai-flows
 
+# Prebuilt WebRTC client UI (served at /client)
+pipecat-ai-small-webrtc-prebuilt
+
 # Web framework
 fastapi>=0.115.6
 uvicorn>=0.32.0
