@@ -635,12 +635,33 @@ def create_tts(tts_type: str):
 
 
 def create_llm(llm_type: str):
-    """Create LLM service based on type."""
+    """Create LLM service based on type.
+
+    For 'ollama' type: tries Ollama first (OLLAMA_BASE_URL), falls back to
+    Groq (GROQ_API_KEY) if Ollama is not configured.
+    """
     if llm_type == "ollama":
-        model = os.getenv("OLLAMA_MODEL", "llama3.1")
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-        logger.info(f"LLM: Ollama ({model}) at {base_url}")
-        return OLLamaLLMService(model=model, base_url=base_url)
+        ollama_url = os.getenv("OLLAMA_BASE_URL", "").strip()
+        groq_key = os.getenv("GROQ_API_KEY", "").strip()
+
+        if ollama_url:
+            model = os.getenv("OLLAMA_MODEL", "llama3.1")
+            logger.info(f"LLM: Ollama ({model}) at {ollama_url}")
+            return OLLamaLLMService(model=model, base_url=ollama_url)
+        elif groq_key:
+            model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+            logger.info(f"LLM: Groq fallback ({model})")
+            return OpenAILLMService(
+                api_key=groq_key,
+                model=model,
+                base_url="https://api.groq.com/openai/v1",
+            )
+        else:
+            logger.warning("LLM: Neither OLLAMA_BASE_URL nor GROQ_API_KEY set, falling back to OpenAI")
+            return OpenAILLMService(
+                api_key=os.getenv("OPENAI_API_KEY"),
+                model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+            )
     else:
         model = os.getenv("OPENAI_MODEL", "gpt-4o")
         logger.info(f"LLM: OpenAI ({model})")

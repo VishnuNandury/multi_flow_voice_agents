@@ -35,8 +35,8 @@ if missing:
 # Optional service keys (warn if missing)
 if not os.getenv("SARVAM_API_KEY"):
     logger.warning("SARVAM_API_KEY not set - Sarvam AI pipeline will not work")
-if not os.getenv("OLLAMA_BASE_URL"):
-    logger.warning("OLLAMA_BASE_URL not set - Ollama pipeline will use localhost:11434")
+if not os.getenv("OLLAMA_BASE_URL") and not os.getenv("GROQ_API_KEY"):
+    logger.warning("Neither OLLAMA_BASE_URL nor GROQ_API_KEY set - Ollama/Groq pipeline will fall back to OpenAI")
 
 # ---------------------------------------------------------------------------
 # ICE / TURN configuration
@@ -208,7 +208,7 @@ async def config_status():
         "deepgram": bool(os.getenv("DEEPGRAM_API_KEY")),
         "openai": bool(os.getenv("OPENAI_API_KEY")),
         "sarvam": bool(os.getenv("SARVAM_API_KEY")),
-        "ollama_url": os.getenv("OLLAMA_BASE_URL", ""),
+        "ollama_or_groq": bool(os.getenv("OLLAMA_BASE_URL") or os.getenv("GROQ_API_KEY")),
     }
 
 
