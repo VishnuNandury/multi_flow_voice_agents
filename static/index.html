@@ -20,25 +20,84 @@
         }
         .header h1 { font-size: 1.4rem; color: #f1f5f9; }
         .header p { font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem; }
+
+        /* ---- Config Panel ---- */
+        .config-section {
+            max-width: 1000px; margin: 1rem auto 0; padding: 0 1.25rem;
+        }
+        .config-toggle-btn {
+            width: 100%; padding: 0.6rem 1rem; border-radius: 8px;
+            border: 1px solid #334155; background: #1e293b;
+            color: #94a3b8; cursor: pointer; font-size: 0.82rem;
+            font-weight: 500; display: flex; align-items: center;
+            justify-content: space-between; transition: all 0.15s;
+        }
+        .config-toggle-btn:hover { border-color: #475569; color: #f1f5f9; }
+        .config-toggle-btn .arrow { transition: transform 0.2s; }
+        .config-toggle-btn.open .arrow { transform: rotate(180deg); }
+        .config-body {
+            display: none; background: #1e293b; border: 1px solid #334155;
+            border-top: none; border-radius: 0 0 8px 8px; padding: 1rem;
+        }
+        .config-body.open { display: block; }
+        .config-row {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 1.25rem;
+        }
+        .config-col h3 {
+            font-size: 0.75rem; color: #64748b; text-transform: uppercase;
+            letter-spacing: 0.05em; margin-bottom: 0.6rem;
+        }
+        .config-field {
+            display: flex; flex-direction: column; gap: 0.2rem;
+            margin-bottom: 0.5rem;
+        }
+        .config-field label {
+            font-size: 0.7rem; color: #94a3b8; font-weight: 500;
+        }
+        .config-field input, .config-field select {
+            padding: 0.4rem 0.55rem; border-radius: 6px;
+            border: 1px solid #334155; background: #0f172a;
+            color: #e2e8f0; font-size: 0.8rem; outline: none;
+            transition: border-color 0.15s;
+        }
+        .config-field input:focus, .config-field select:focus {
+            border-color: #3b82f6;
+        }
+        .config-field-row {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
+        }
+
+        /* ---- Pipeline Grid ---- */
         .grid {
             display: grid; grid-template-columns: 1fr 1fr;
-            gap: 1rem; padding: 1.25rem; max-width: 1000px; margin: 0 auto;
+            gap: 1rem; padding: 1rem 1.25rem; max-width: 1000px; margin: 0 auto;
         }
         .card {
             background: #1e293b; border-radius: 12px; padding: 1.5rem;
             border: 1px solid #334155; transition: all 0.2s; cursor: default;
         }
         .card:hover { border-color: #475569; }
+        .card.card-featured {
+            grid-column: 1 / -1; border-color: #475569;
+            background: linear-gradient(135deg, #1e293b 0%, #1a2744 100%);
+        }
         .card h2 { font-size: 1.05rem; color: #f1f5f9; margin-bottom: 0.5rem; }
-        .badges { display: flex; gap: 0.4rem; margin-bottom: 1rem; }
+        .badges { display: flex; gap: 0.4rem; margin-bottom: 1rem; flex-wrap: wrap; }
         .badge {
             font-size: 0.65rem; padding: 0.2rem 0.55rem; border-radius: 9999px;
             font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em;
         }
         .badge-stt { background: #1e3a5f; color: #93c5fd; }
         .badge-tts { background: #3b1f5e; color: #c4b5fd; }
+        .badge-llm { background: #1f3b2e; color: #86efac; }
         .card-desc {
             font-size: 0.78rem; color: #94a3b8; margin-bottom: 1rem; line-height: 1.4;
+        }
+        .card-warn {
+            font-size: 0.7rem; color: #fbbf24; margin-bottom: 0.75rem;
+            padding: 0.4rem 0.6rem; background: rgba(251, 191, 36, 0.1);
+            border-radius: 6px; line-height: 1.3;
         }
         .btn {
             padding: 0.55rem 1.25rem; border-radius: 8px; border: none;
@@ -47,6 +106,7 @@
         }
         .btn-connect { background: #3b82f6; color: #fff; }
         .btn-connect:hover { background: #2563eb; }
+        .btn-connect:disabled { background: #475569; cursor: not-allowed; }
 
         /* ---- Client View ---- */
         #client-view {
@@ -116,16 +176,77 @@
 
         @media (max-width: 768px) {
             .grid { grid-template-columns: 1fr; padding: 0.75rem; }
+            .config-row { grid-template-columns: 1fr; }
+            .config-field-row { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
-    <!-- Dashboard: pipeline selector grid -->
+    <!-- Dashboard: config + pipeline selector grid -->
     <div id="dashboard-view">
         <div class="header">
             <h1>Loan Collection Agent &mdash; Pipeline Comparison</h1>
-            <p>Select a pipeline to start a voice conversation. Flow stages are tracked in real-time.</p>
+            <p>Configure the agent, select a pipeline, and start a voice conversation.</p>
         </div>
+
+        <!-- Agent Configuration Panel -->
+        <div class="config-section">
+            <button class="config-toggle-btn" id="config-toggle" onclick="toggleConfig()">
+                <span>Agent Configuration</span>
+                <span class="arrow">&#9660;</span>
+            </button>
+            <div class="config-body" id="config-body">
+                <div class="config-row">
+                    <div class="config-col">
+                        <h3>Agent Settings</h3>
+                        <div class="config-field">
+                            <label>Agent Name</label>
+                            <input type="text" id="cfg-agent-name" value="Priya">
+                        </div>
+                        <div class="config-field">
+                            <label>Company Name</label>
+                            <input type="text" id="cfg-company" value="QuickFinance Ltd.">
+                        </div>
+                        <div class="config-field">
+                            <label>Language</label>
+                            <select id="cfg-language">
+                                <option value="hinglish" selected>Hinglish (Hindi + English)</option>
+                                <option value="hindi">Hindi</option>
+                                <option value="english">English</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="config-col">
+                        <h3>Borrower Scenario</h3>
+                        <div class="config-field">
+                            <label>Borrower Name</label>
+                            <input type="text" id="cfg-borrower" value="Rajesh Kumar">
+                        </div>
+                        <div class="config-field-row">
+                            <div class="config-field">
+                                <label>EMI Amount (Rs.)</label>
+                                <input type="text" id="cfg-emi" value="5,280">
+                            </div>
+                            <div class="config-field">
+                                <label>Total Due (Rs.)</label>
+                                <input type="text" id="cfg-total" value="11,760">
+                            </div>
+                        </div>
+                        <div class="config-field-row">
+                            <div class="config-field">
+                                <label>Overdue Months</label>
+                                <input type="text" id="cfg-overdue" value="2">
+                            </div>
+                            <div class="config-field">
+                                <label>Account Number</label>
+                                <input type="text" id="cfg-account" value="QF-2024-78432">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="grid" id="grid"></div>
     </div>
 
@@ -136,6 +257,7 @@
                 <span class="pipeline-label" id="active-label"></span>
                 <span class="badge badge-stt" id="active-stt"></span>
                 <span class="badge badge-tts" id="active-tts"></span>
+                <span class="badge badge-llm" id="active-llm"></span>
             </div>
             <button class="btn-back" onclick="backToDashboard()">Back to Dashboard</button>
         </div>
@@ -150,24 +272,35 @@
     <script>
     const PIPELINES = [
         {
-            stt: 'deepgram', tts: 'openai',
+            stt: 'deepgram', tts: 'openai', llm: 'openai',
             label: 'Deepgram + OpenAI TTS',
             desc: 'Streaming STT via Deepgram Nova-3 with OpenAI TTS voice synthesis. Best overall quality.',
+            requires: ['deepgram', 'openai'],
         },
         {
-            stt: 'deepgram', tts: 'edge',
+            stt: 'deepgram', tts: 'edge', llm: 'openai',
             label: 'Deepgram + Edge TTS',
             desc: 'Streaming STT via Deepgram Nova-3 with free Microsoft Edge TTS (excellent Hindi pronunciation).',
+            requires: ['deepgram', 'openai'],
         },
         {
-            stt: 'whisper', tts: 'openai',
+            stt: 'whisper', tts: 'openai', llm: 'openai',
             label: 'Whisper + OpenAI TTS',
             desc: 'OpenAI Whisper (gpt-4o-transcribe) for STT with OpenAI TTS voice synthesis.',
+            requires: ['openai'],
         },
         {
-            stt: 'whisper', tts: 'edge',
+            stt: 'whisper', tts: 'edge', llm: 'openai',
             label: 'Whisper + Edge TTS',
             desc: 'OpenAI Whisper for STT with free Microsoft Edge TTS. Fully Hindi-optimized.',
+            requires: ['openai'],
+        },
+        {
+            stt: 'sarvam', tts: 'sarvam', llm: 'ollama',
+            label: 'Sarvam AI + Ollama',
+            desc: 'Indian-made Sarvam AI for STT (saarika) and TTS (bulbul) with Ollama LLM. Optimized for Indian languages.',
+            requires: ['sarvam'],
+            featured: true,
         },
     ];
 
@@ -183,28 +316,83 @@
     ];
 
     let pollInterval = null;
+    let configStatus = {};
+
+    // ---- Fetch config status on load ----
+    async function fetchConfigStatus() {
+        try {
+            const res = await fetch('/api/config-status');
+            if (res.ok) configStatus = await res.json();
+        } catch (e) {
+            // Use defaults
+        }
+        buildCards();
+    }
+
+    // ---- Config panel toggle ----
+    function toggleConfig() {
+        const btn = document.getElementById('config-toggle');
+        const body = document.getElementById('config-body');
+        btn.classList.toggle('open');
+        body.classList.toggle('open');
+    }
+
+    function getAgentConfig() {
+        return {
+            agent_name: document.getElementById('cfg-agent-name').value,
+            company_name: document.getElementById('cfg-company').value,
+            language: document.getElementById('cfg-language').value,
+            borrower_name: document.getElementById('cfg-borrower').value,
+            emi_amount: document.getElementById('cfg-emi').value,
+            total_due: document.getElementById('cfg-total').value,
+            overdue_months: document.getElementById('cfg-overdue').value,
+            account_number: document.getElementById('cfg-account').value,
+        };
+    }
 
     // ---- Build pipeline cards ----
-    const grid = document.getElementById('grid');
+    function buildCards() {
+        const grid = document.getElementById('grid');
+        grid.innerHTML = '';
 
-    PIPELINES.forEach(p => {
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.innerHTML = `
-            <h2>${p.label}</h2>
-            <div class="badges">
+        PIPELINES.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'card' + (p.featured ? ' card-featured' : '');
+
+            // Check if required services are configured
+            const missingKeys = (p.requires || []).filter(k => !configStatus[k]);
+            const hasWarning = missingKeys.length > 0;
+
+            let badgesHtml = `
                 <span class="badge badge-stt">STT: ${p.stt}</span>
                 <span class="badge badge-tts">TTS: ${p.tts}</span>
-            </div>
-            <div class="card-desc">${p.desc}</div>
-            <button class="btn btn-connect">Connect</button>
-        `;
-        grid.appendChild(card);
+            `;
+            if (p.llm !== 'openai') {
+                badgesHtml += `<span class="badge badge-llm">LLM: ${p.llm}</span>`;
+            }
 
-        card.querySelector('.btn-connect').addEventListener('click', () => {
-            openPipeline(p);
+            let warnHtml = '';
+            if (hasWarning) {
+                const names = missingKeys.map(k => k.toUpperCase() + '_API_KEY').join(', ');
+                warnHtml = `<div class="card-warn">Requires env var: ${names}</div>`;
+            }
+
+            card.innerHTML = `
+                <h2>${p.label}</h2>
+                <div class="badges">${badgesHtml}</div>
+                <div class="card-desc">${p.desc}</div>
+                ${warnHtml}
+                <button class="btn btn-connect" ${hasWarning ? 'disabled' : ''}>Connect</button>
+            `;
+            grid.appendChild(card);
+
+            if (!hasWarning) {
+                card.querySelector('.btn-connect').addEventListener('click', () => {
+                    openPipeline(p);
+                });
+            }
         });
-    });
+    }
 
     // ---- Build flow steps bar ----
     function buildFlowBar() {
@@ -282,11 +470,18 @@
 
     // ---- Pipeline selection & client view ----
     async function openPipeline(p) {
+        const config = getAgentConfig();
+
         try {
             const res = await fetch('/set-pipeline', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ stt: p.stt, tts: p.tts }),
+                body: JSON.stringify({
+                    stt: p.stt,
+                    tts: p.tts,
+                    llm: p.llm,
+                    config: config,
+                }),
             });
             if (!res.ok) throw new Error(`set-pipeline returned ${res.status}`);
         } catch (e) {
@@ -298,6 +493,13 @@
         document.getElementById('active-label').textContent = p.label;
         document.getElementById('active-stt').textContent = 'STT: ' + p.stt;
         document.getElementById('active-tts').textContent = 'TTS: ' + p.tts;
+        const llmBadge = document.getElementById('active-llm');
+        if (p.llm !== 'openai') {
+            llmBadge.textContent = 'LLM: ' + p.llm;
+            llmBadge.style.display = '';
+        } else {
+            llmBadge.style.display = 'none';
+        }
 
         // Build flow steps
         buildFlowBar();
@@ -329,6 +531,9 @@
         document.getElementById('client-view').style.display = 'none';
         document.getElementById('dashboard-view').style.display = 'block';
     }
+
+    // Initialize
+    fetchConfigStatus();
     </script>
 </body>
 </html>

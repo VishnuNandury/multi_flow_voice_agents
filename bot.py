@@ -5,7 +5,8 @@
 # Stages: greeting -> overdue_info -> understand_situation
 #        -> payment_options -> commitment -> promise_to_pay -> end
 #
-# Pipeline configs (STT/TTS) are passed per-session from the server.
+# Pipeline configs (STT/TTS/LLM) are passed per-session from the server.
+# Agent persona and borrower details are configurable from the dashboard.
 #
 
 import os
@@ -39,6 +40,10 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.openai.tts import OpenAITTSService
+from pipecat.services.sarvam.tts import SarvamTTSService
+from pipecat.services.sarvam.stt import SarvamSTTService
+from pipecat.services.ollama.llm import OLLamaLLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
@@ -48,36 +53,81 @@ from pipecat_flows import FlowArgs, FlowManager, FlowsFunctionSchema, NodeConfig
 
 
 # ---------------------------------------------------------------------------
-# Priya persona — consistent across all flow nodes
+# Configurable agent persona + borrower details
 # ---------------------------------------------------------------------------
 
-ROLE_MESSAGE = {
-    "role": "system",
-    "content": (
-        'You are "Priya", a professional and empathetic loan collection agent '
-        'working for "QuickFinance Ltd."\n\n'
-        "LANGUAGE RULES:\n"
-        "- Speak in the SAME language the borrower uses.\n"
-        "- If they speak Hindi, respond in Hindi.\n"
-        "- If they speak English, respond in English.\n"
-        "- If they mix Hindi and English (Hinglish), you also mix naturally.\n"
-        "- Default to Hinglish as it feels most natural for Indian borrowers.\n\n"
-        "STYLE:\n"
-        "- Warm, professional, empathetic — NEVER threatening or rude.\n"
-        "- Short, natural sentences (this is a voice call, not text).\n"
-        "- No bullet points, markdown, special characters, or emojis.\n"
-        "- Max 2-3 sentences at a time.\n"
-        "- You must ALWAYS use one of the available functions to progress the conversation.\n"
-        "- Your responses will be converted to audio so avoid any formatting."
-    ),
+DEFAULT_CONFIG = {
+    "agent_name": "Priya",
+    "company_name": "QuickFinance Ltd.",
+    "borrower_name": "Rajesh Kumar",
+    "account_number": "QF-2024-78432",
+    "loan_type": "Personal Loan",
+    "emi_amount": "5,280",
+    "overdue_months": "2",
+    "overdue_period": "Dec 2025, Jan 2026",
+    "late_fee": "1,200",
+    "total_due": "11,760",
+    "last_payment": "Nov 28, 2025",
+    "language": "hinglish",
 }
 
-BORROWER_INFO = (
-    "Borrower: Rajesh Kumar | Account: QF-2024-78432 | Personal Loan\n"
-    "EMI: Rs. 5,280 | Overdue: 2 months (Dec 2025, Jan 2026) | "
-    "Late Fee: Rs. 1,200 | Total Due: Rs. 11,760\n"
-    "Last Payment: Nov 28, 2025"
-)
+
+def _build_config(agent_config: dict = None) -> dict:
+    """Merge user-provided config with defaults."""
+    cfg = dict(DEFAULT_CONFIG)
+    if agent_config:
+        for k, v in agent_config.items():
+            if v:  # only override with non-empty values
+                cfg[k] = v
+    return cfg
+
+
+def _make_role_message(cfg: dict) -> dict:
+    """Build the system role message dynamically from config."""
+    lang_instructions = {
+        "hindi": (
+            "- Always speak in Hindi (Devanagari transliteration).\n"
+            "- Do not use English unless the borrower does."
+        ),
+        "english": (
+            "- Always speak in English.\n"
+            "- Use simple, clear English suitable for Indian borrowers."
+        ),
+        "hinglish": (
+            "- Speak in the SAME language the borrower uses.\n"
+            "- If they speak Hindi, respond in Hindi.\n"
+            "- If they speak English, respond in English.\n"
+            "- If they mix Hindi and English (Hinglish), you also mix naturally.\n"
+            "- Default to Hinglish as it feels most natural for Indian borrowers."
+        ),
+    }
+    lang_rule = lang_instructions.get(cfg["language"], lang_instructions["hinglish"])
+
+    return {
+        "role": "system",
+        "content": (
+            f'You are "{cfg["agent_name"]}", a professional and empathetic loan collection agent '
+            f'working for "{cfg["company_name"]}"\n\n'
+            f"LANGUAGE RULES:\n{lang_rule}\n\n"
+            "STYLE:\n"
+            "- Warm, professional, empathetic — NEVER threatening or rude.\n"
+            "- Short, natural sentences (this is a voice call, not text).\n"
+            "- No bullet points, markdown, special characters, or emojis.\n"
+            "- Max 2-3 sentences at a time.\n"
+            "- You must ALWAYS use one of the available functions to progress the conversation.\n"
+            "- Your responses will be converted to audio so avoid any formatting."
+        ),
+    }
+
+
+def _make_borrower_info(cfg: dict) -> str:
+    """Build borrower info string from config."""
+    return (
+        f"Borrower: {cfg['borrower_name']} | Account: {cfg['account_number']} | {cfg['loan_type']}\n"
+        f"EMI: Rs. {cfg['emi_amount']} | Overdue: {cfg['overdue_months']} months ({cfg['overdue_period']}) | "
+        f"Late Fee: Rs. {cfg['late_fee']} | Total Due: Rs. {cfg['total_due']}\n"
+        f"Last Payment: {cfg['last_payment']}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +144,7 @@ FLOW_NODES = [
     {"id": "end", "label": "Complete"},
 ]
 
-# pc_id -> {current_node, start_time, stt_type, tts_type, transcript}
+# pc_id -> {current_node, start_time, stt_type, tts_type, llm_type, transcript}
 session_data: dict = {}
 
 
@@ -157,34 +207,39 @@ class AssistantTranscriptCapture(FrameProcessor):
 
 
 # ---------------------------------------------------------------------------
-# Flow Node Definitions
+# Flow Node Definitions (all accept cfg dict for dynamic personalization)
 # ---------------------------------------------------------------------------
 
-def create_greeting_node() -> NodeConfig:
+def create_greeting_node(cfg: dict) -> NodeConfig:
     """Node 1: Greet and confirm identity."""
+    role_msg = _make_role_message(cfg)
+    info = _make_borrower_info(cfg)
+    bname = cfg["borrower_name"]
+    aname = cfg["agent_name"]
+    cname = cfg["company_name"]
 
     async def confirm_identity(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         flow_manager.state["identity_confirmed"] = True
         _track_node(flow_manager, "overdue_info")
-        return "Identity confirmed as Rajesh Kumar", create_overdue_info_node()
+        return f"Identity confirmed as {bname}", create_overdue_info_node(cfg)
 
     async def wrong_person(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         _track_node(flow_manager, "end")
-        return "Wrong person on the line", create_wrong_person_end_node()
+        return "Wrong person on the line", create_wrong_person_end_node(cfg)
 
     return NodeConfig(
         name="greeting",
-        role_messages=[ROLE_MESSAGE],
+        role_messages=[role_msg],
         task_messages=[
             {
                 "role": "system",
                 "content": (
-                    "Greet warmly in Hinglish. Say something like: "
-                    '"Namaste, kya main Rajesh Kumar ji se baat kar rahi hoon? '
-                    'Main Priya bol rahi hoon, QuickFinance ki taraf se."\n\n'
-                    "Wait for their response. Use confirm_identity if they confirm "
-                    "(even partially), or wrong_person if they deny.\n\n"
-                    f"{BORROWER_INFO}"
+                    f"Greet warmly in Hinglish. Say something like: "
+                    f'"Namaste, kya main {bname} ji se baat kar rahi hoon? '
+                    f'Main {aname} bol rahi hoon, {cname} ki taraf se."\n\n'
+                    f"Wait for their response. Use confirm_identity if they confirm "
+                    f"(even partially), or wrong_person if they deny.\n\n"
+                    f"{info}"
                 ),
             }
         ],
@@ -192,14 +247,14 @@ def create_greeting_node() -> NodeConfig:
             FlowsFunctionSchema(
                 name="confirm_identity",
                 handler=confirm_identity,
-                description="Person confirms they are Rajesh Kumar or acknowledges their identity",
+                description=f"Person confirms they are {bname} or acknowledges their identity",
                 properties={},
                 required=[],
             ),
             FlowsFunctionSchema(
                 name="wrong_person",
                 handler=wrong_person,
-                description="Person says they are NOT Rajesh Kumar or denies their identity",
+                description=f"Person says they are NOT {bname} or denies their identity",
                 properties={},
                 required=[],
             ),
@@ -207,12 +262,14 @@ def create_greeting_node() -> NodeConfig:
     )
 
 
-def create_overdue_info_node() -> NodeConfig:
+def create_overdue_info_node(cfg: dict) -> NodeConfig:
     """Node 2: Inform about overdue EMIs."""
+    info = _make_borrower_info(cfg)
+    bname = cfg["borrower_name"]
 
     async def borrower_responds(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         _track_node(flow_manager, "understand_situation")
-        return "Borrower acknowledged overdue information", create_situation_node()
+        return "Borrower acknowledged overdue information", create_situation_node(cfg)
 
     return NodeConfig(
         name="overdue_info",
@@ -220,13 +277,13 @@ def create_overdue_info_node() -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    "Politely inform about overdue EMIs. Say something like: "
-                    '"Rajesh ji, main aapko ek zaroori baat batana chahti thi. '
-                    "Aapke do EMIs pending hain, December aur January ke. "
-                    'Total Rs. 11,760 outstanding hai including late fee."\n\n'
-                    "Be gentle and empathetic. After they respond in any way, "
-                    "use borrower_responds to move forward.\n\n"
-                    f"{BORROWER_INFO}"
+                    f"Politely inform about overdue EMIs. Say something like: "
+                    f'"{bname} ji, main aapko ek zaroori baat batana chahti thi. '
+                    f"Aapke {cfg['overdue_months']} EMIs pending hain, {cfg['overdue_period']} ke. "
+                    f'Total Rs. {cfg["total_due"]} outstanding hai including late fee."\n\n'
+                    f"Be gentle and empathetic. After they respond in any way, "
+                    f"use borrower_responds to move forward.\n\n"
+                    f"{info}"
                 ),
             }
         ],
@@ -242,14 +299,15 @@ def create_overdue_info_node() -> NodeConfig:
     )
 
 
-def create_situation_node() -> NodeConfig:
+def create_situation_node(cfg: dict) -> NodeConfig:
     """Node 3: Understand borrower's situation."""
+    bname = cfg["borrower_name"]
 
     async def record_situation(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         reason = args.get("reason", "not specified")
         flow_manager.state["reason"] = reason
         _track_node(flow_manager, "payment_options")
-        return f"Borrower's reason: {reason}", create_payment_options_node()
+        return f"Borrower's reason: {reason}", create_payment_options_node(cfg)
 
     return NodeConfig(
         name="understand_situation",
@@ -257,11 +315,11 @@ def create_situation_node() -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    "Ask empathetically about their situation. Say something like: "
-                    '"Main samajh sakti hoon Rajesh ji. Kya aap bata sakte hain ki '
-                    "koi specific wajah thi EMI miss hone ki? "
-                    'Main aapki help karna chahti hoon."\n\n'
-                    "Listen with empathy, then use record_situation to move to payment options."
+                    f"Ask empathetically about their situation. Say something like: "
+                    f'"Main samajh sakti hoon {bname} ji. Kya aap bata sakte hain ki '
+                    f"koi specific wajah thi EMI miss hone ki? "
+                    f'Main aapki help karna chahti hoon."\n\n'
+                    f"Listen with empathy, then use record_situation to move to payment options."
                 ),
             }
         ],
@@ -282,28 +340,31 @@ def create_situation_node() -> NodeConfig:
     )
 
 
-def create_payment_options_node() -> NodeConfig:
+def create_payment_options_node(cfg: dict) -> NodeConfig:
     """Node 4: Present payment options."""
+    bname = cfg["borrower_name"]
+    total = cfg["total_due"]
+    emi = cfg["emi_amount"]
 
     async def select_full_payment(args: FlowArgs, flow_manager: FlowManager) -> tuple:
-        flow_manager.state["plan"] = "Full payment of Rs. 11,760"
+        flow_manager.state["plan"] = f"Full payment of Rs. {total}"
         _track_node(flow_manager, "commitment")
-        return "Full payment selected", create_commitment_node()
+        return "Full payment selected", create_commitment_node(cfg)
 
     async def select_split_payment(args: FlowArgs, flow_manager: FlowManager) -> tuple:
-        flow_manager.state["plan"] = "Rs. 5,280 now + Rs. 6,480 in 15 days"
+        flow_manager.state["plan"] = f"Rs. {emi} now + remaining in 15 days"
         _track_node(flow_manager, "commitment")
-        return "Split payment plan selected", create_commitment_node()
+        return "Split payment plan selected", create_commitment_node(cfg)
 
     async def select_partial_plan(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         flow_manager.state["plan"] = "Rs. 4,000 now + remaining in 2 installments"
         _track_node(flow_manager, "commitment")
-        return "Partial payment plan selected", create_commitment_node()
+        return "Partial payment plan selected", create_commitment_node(cfg)
 
     async def request_callback(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         flow_manager.state["plan"] = "Callback requested"
         _track_node(flow_manager, "end")
-        return "Senior representative callback requested", create_callback_end_node()
+        return "Senior representative callback requested", create_callback_end_node(cfg)
 
     return NodeConfig(
         name="payment_options",
@@ -311,15 +372,15 @@ def create_payment_options_node() -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    "Present payment options naturally and sympathetically. "
-                    "Do NOT read them as a numbered list. Weave them into conversation.\n\n"
-                    "Options available:\n"
-                    "- Full Rs. 11,760 payment right away (late fee discount possible)\n"
-                    "- Pay one EMI Rs. 5,280 now, remaining Rs. 6,480 within 15 days\n"
-                    "- Rs. 4,000 now, remaining in 2 easy installments\n"
-                    "- Request a callback from senior representative for restructuring\n\n"
-                    "Recommend based on what the borrower has shared. "
-                    "Use the matching function when they choose."
+                    f"Present payment options naturally and sympathetically. "
+                    f"Do NOT read them as a numbered list. Weave them into conversation.\n\n"
+                    f"Options available:\n"
+                    f"- Full Rs. {total} payment right away (late fee discount possible)\n"
+                    f"- Pay one EMI Rs. {emi} now, remaining within 15 days\n"
+                    f"- Rs. 4,000 now, remaining in 2 easy installments\n"
+                    f"- Request a callback from senior representative for restructuring\n\n"
+                    f"Recommend based on what the borrower has shared. "
+                    f"Use the matching function when they choose."
                 ),
             }
         ],
@@ -327,14 +388,14 @@ def create_payment_options_node() -> NodeConfig:
             FlowsFunctionSchema(
                 name="select_full_payment",
                 handler=select_full_payment,
-                description="Borrower agrees to pay full Rs. 11,760 immediately",
+                description=f"Borrower agrees to pay full Rs. {total} immediately",
                 properties={},
                 required=[],
             ),
             FlowsFunctionSchema(
                 name="select_split_payment",
                 handler=select_split_payment,
-                description="Borrower wants to pay Rs. 5,280 now and rest in 15 days",
+                description=f"Borrower wants to pay Rs. {emi} now and rest in 15 days",
                 properties={},
                 required=[],
             ),
@@ -356,15 +417,16 @@ def create_payment_options_node() -> NodeConfig:
     )
 
 
-def create_commitment_node() -> NodeConfig:
+def create_commitment_node(cfg: dict) -> NodeConfig:
     """Node 5: Get payment commitment with a specific date."""
+    bname = cfg["borrower_name"]
 
     async def confirm_commitment(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         date = args.get("payment_date", "not specified")
         flow_manager.state["payment_date"] = date
         plan = flow_manager.state.get("plan", "")
         _track_node(flow_manager, "promise_to_pay")
-        return f"Payment commitment: {plan} by {date}", create_promise_to_pay_node()
+        return f"Payment commitment: {plan} by {date}", create_promise_to_pay_node(cfg)
 
     return NodeConfig(
         name="commitment",
@@ -372,11 +434,11 @@ def create_commitment_node() -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    "Confirm the chosen payment plan and ask for a specific date. "
-                    "Say something like: "
-                    '"Bahut accha Rajesh ji! Kya aap mujhe ek specific date bata sakte hain '
-                    'jab tak aap payment kar denge?"\n\n'
-                    "Once they give a date, use confirm_commitment."
+                    f"Confirm the chosen payment plan and ask for a specific date. "
+                    f"Say something like: "
+                    f'"Bahut accha {bname} ji! Kya aap mujhe ek specific date bata sakte hain '
+                    f'jab tak aap payment kar denge?"\n\n'
+                    f"Once they give a date, use confirm_commitment."
                 ),
             }
         ],
@@ -397,19 +459,20 @@ def create_commitment_node() -> NodeConfig:
     )
 
 
-def create_promise_to_pay_node() -> NodeConfig:
+def create_promise_to_pay_node(cfg: dict) -> NodeConfig:
     """Node 6: Formal Promise to Pay (PTP) confirmation."""
+    bname = cfg["borrower_name"]
 
     async def confirm_ptp(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         plan = flow_manager.state.get("plan", "")
         date = flow_manager.state.get("payment_date", "")
         logger.info(f"PTP confirmed: {plan} by {date}")
         _track_node(flow_manager, "end")
-        return f"PTP confirmed: {plan} by {date}", create_end_node()
+        return f"PTP confirmed: {plan} by {date}", create_end_node(cfg)
 
     async def revise_plan(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         _track_node(flow_manager, "payment_options")
-        return "Borrower wants to revise the plan", create_payment_options_node()
+        return "Borrower wants to revise the plan", create_payment_options_node(cfg)
 
     return NodeConfig(
         name="promise_to_pay",
@@ -417,13 +480,13 @@ def create_promise_to_pay_node() -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    "Formally confirm the Promise to Pay. Summarize the commitment clearly. "
-                    "Say something like: "
-                    '"Rajesh ji, toh main confirm kar rahi hoon — aap [plan details] '
-                    "[date] tak kar denge. Kya aap is commitment ko confirm karte hain? "
-                    'Yeh aapka Promise to Pay hoga."\n\n'
-                    "If they confirm, use confirm_ptp. "
-                    "If they want to change, use revise_plan."
+                    f"Formally confirm the Promise to Pay. Summarize the commitment clearly. "
+                    f"Say something like: "
+                    f'"{bname} ji, toh main confirm kar rahi hoon — aap [plan details] '
+                    f"[date] tak kar denge. Kya aap is commitment ko confirm karte hain? "
+                    f'Yeh aapka Promise to Pay hoga."\n\n'
+                    f"If they confirm, use confirm_ptp. "
+                    f"If they want to change, use revise_plan."
                 ),
             }
         ],
@@ -446,20 +509,21 @@ def create_promise_to_pay_node() -> NodeConfig:
     )
 
 
-def create_end_node() -> NodeConfig:
+def create_end_node(cfg: dict) -> NodeConfig:
     """Final node: Thank the borrower and close."""
+    bname = cfg["borrower_name"]
     return NodeConfig(
         name="end",
         task_messages=[
             {
                 "role": "system",
                 "content": (
-                    "Thank the borrower warmly and close the call. Summarize their commitment. "
-                    "Say something like: "
-                    '"Bahut bahut dhanyavaad Rajesh ji! Main aapka Promise to Pay note kar rahi hoon. '
-                    "Aap UPI ya net banking se payment kar sakte hain. "
-                    'Aapka din shubh ho!"\n\n'
-                    "Be warm, professional, and end on a positive note."
+                    f"Thank the borrower warmly and close the call. Summarize their commitment. "
+                    f"Say something like: "
+                    f'"Bahut bahut dhanyavaad {bname} ji! Main aapka Promise to Pay note kar rahi hoon. '
+                    f"Aap UPI ya net banking se payment kar sakte hain. "
+                    f'Aapka din shubh ho!"\n\n'
+                    f"Be warm, professional, and end on a positive note."
                 ),
             }
         ],
@@ -467,7 +531,7 @@ def create_end_node() -> NodeConfig:
     )
 
 
-def create_wrong_person_end_node() -> NodeConfig:
+def create_wrong_person_end_node(cfg: dict) -> NodeConfig:
     """End node when the person is not the borrower."""
     return NodeConfig(
         name="wrong_person_end",
@@ -485,18 +549,19 @@ def create_wrong_person_end_node() -> NodeConfig:
     )
 
 
-def create_callback_end_node() -> NodeConfig:
+def create_callback_end_node(cfg: dict) -> NodeConfig:
     """End node when borrower requests a senior callback."""
+    bname = cfg["borrower_name"]
     return NodeConfig(
         name="callback_end",
         task_messages=[
             {
                 "role": "system",
                 "content": (
-                    "Confirm the callback request warmly. Say something like: "
-                    '"Bilkul Rajesh ji, main aapki request note kar rahi hoon. '
-                    "Humare senior representative aapko 24 ghante mein call karenge. "
-                    'Dhanyavaad aapke time ke liye!"'
+                    f"Confirm the callback request warmly. Say something like: "
+                    f'"Bilkul {bname} ji, main aapki request note kar rahi hoon. '
+                    f"Humare senior representative aapko 24 ghante mein call karenge. "
+                    f'Dhanyavaad aapke time ke liye!"'
                 ),
             }
         ],
@@ -510,7 +575,14 @@ def create_callback_end_node() -> NodeConfig:
 
 def create_stt(stt_type: str):
     """Create STT service based on type."""
-    if stt_type == "whisper":
+    if stt_type == "sarvam":
+        logger.info("STT: Sarvam saarika:v2.5 (Hindi)")
+        return SarvamSTTService(
+            api_key=os.getenv("SARVAM_API_KEY", ""),
+            model="saarika:v2.5",
+            params=SarvamSTTService.InputParams(language=Language.HI_IN),
+        )
+    elif stt_type == "whisper":
         logger.info("STT: OpenAI Whisper (gpt-4o-transcribe)")
         return OpenAISTTService(
             api_key=os.getenv("OPENAI_API_KEY"),
@@ -535,7 +607,15 @@ def create_stt(stt_type: str):
 
 def create_tts(tts_type: str):
     """Create TTS service based on type."""
-    if tts_type == "edge":
+    if tts_type == "sarvam":
+        logger.info("TTS: Sarvam bulbul:v2 (anushka)")
+        return SarvamTTSService(
+            api_key=os.getenv("SARVAM_API_KEY", ""),
+            model="bulbul:v2",
+            voice_id=os.getenv("SARVAM_TTS_VOICE", "anushka"),
+            params=SarvamTTSService.InputParams(language=Language.HI),
+        )
+    elif tts_type == "edge":
         logger.info("TTS: Edge TTS (hi-IN-SwaraNeural)")
         return EdgeTTSService(
             voice=os.getenv("EDGE_TTS_VOICE", "hi-IN-SwaraNeural"),
@@ -554,6 +634,22 @@ def create_tts(tts_type: str):
         )
 
 
+def create_llm(llm_type: str):
+    """Create LLM service based on type."""
+    if llm_type == "ollama":
+        model = os.getenv("OLLAMA_MODEL", "llama3.1")
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        logger.info(f"LLM: Ollama ({model}) at {base_url}")
+        return OLLamaLLMService(model=model, base_url=base_url)
+    else:
+        model = os.getenv("OPENAI_MODEL", "gpt-4o")
+        logger.info(f"LLM: OpenAI ({model})")
+        return OpenAILLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model=model,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Bot Pipeline
 # ---------------------------------------------------------------------------
@@ -562,11 +658,17 @@ async def run_bot(
     webrtc_connection: SmallWebRTCConnection,
     stt_type: str = "deepgram",
     tts_type: str = "openai",
+    llm_type: str = "openai",
+    agent_config: dict = None,
 ):
     """Create and run the voice agent pipeline with PipeCat Flows."""
 
     pc_id = webrtc_connection.pc_id
-    logger.info(f"=== Pipeline: STT={stt_type} | TTS={tts_type} | pc_id={pc_id} ===")
+    cfg = _build_config(agent_config)
+    logger.info(
+        f"=== Pipeline: STT={stt_type} | TTS={tts_type} | LLM={llm_type} | pc_id={pc_id} ==="
+    )
+    logger.info(f"Agent: {cfg['agent_name']} @ {cfg['company_name']} | Borrower: {cfg['borrower_name']}")
 
     # --- Transport (WebRTC — no explicit sample rates, matches working Agent_pipecat) ---
     transport = SmallWebRTCTransport(
@@ -577,11 +679,7 @@ async def run_bot(
     # --- Services ---
     stt = create_stt(stt_type)
     tts = create_tts(tts_type)
-
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model=os.getenv("OPENAI_MODEL", "gpt-4o"),
-    )
+    llm = create_llm(llm_type)
 
     # --- Context (empty — FlowManager populates it per node) ---
     context = OpenAILLMContext([])
@@ -629,19 +727,20 @@ async def run_bot(
         "start_time": time.time(),
         "stt_type": stt_type,
         "tts_type": tts_type,
+        "llm_type": llm_type,
         "transcript": [],
     }
 
     # --- Event handlers ---
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected ({stt_type}+{tts_type})")
+        logger.info(f"Client connected ({stt_type}+{tts_type}+{llm_type})")
         flow_manager.state["pc_id"] = pc_id
-        await flow_manager.initialize(create_greeting_node())
+        await flow_manager.initialize(create_greeting_node(cfg))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected ({stt_type}+{tts_type})")
+        logger.info(f"Client disconnected ({stt_type}+{tts_type}+{llm_type})")
         session_data.pop(pc_id, None)
         await task.queue_frames([EndFrame()])
 

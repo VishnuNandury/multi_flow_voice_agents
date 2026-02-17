@@ -2,8 +2,8 @@
 # Multi-Pipeline Voice Agent Server
 #
 # Single-port FastAPI server supporting multiple concurrent pipeline configs.
-# Each WebRTC session can use a different STT/TTS combination.
-# Serves a custom dashboard at / with 4 pipeline comparison panels.
+# Each WebRTC session can use a different STT/TTS/LLM combination.
+# Serves a custom dashboard at / with 5 pipeline comparison panels.
 #
 
 import os
@@ -31,6 +31,12 @@ missing = [k for k in REQUIRED_KEYS if not os.getenv(k)]
 if missing:
     logger.error(f"Missing environment variables: {', '.join(missing)}")
     sys.exit(1)
+
+# Optional service keys (warn if missing)
+if not os.getenv("SARVAM_API_KEY"):
+    logger.warning("SARVAM_API_KEY not set - Sarvam AI pipeline will not work")
+if not os.getenv("OLLAMA_BASE_URL"):
+    logger.warning("OLLAMA_BASE_URL not set - Ollama pipeline will use localhost:11434")
 
 # ---------------------------------------------------------------------------
 # ICE / TURN configuration
@@ -113,7 +119,12 @@ small_webrtc_handler = SmallWebRTCRequestHandler(ice_servers=ICE_SERVERS)
 active_sessions: Dict[str, Dict[str, Any]] = {}
 
 # Pipeline selected from dashboard (consumed by the next /start call)
-_next_pipeline: Dict[str, str] = {"pipeline_stt": "deepgram", "pipeline_tts": "openai"}
+_next_pipeline: Dict[str, Any] = {
+    "pipeline_stt": "deepgram",
+    "pipeline_tts": "openai",
+    "pipeline_llm": "openai",
+    "agent_config": {},
+}
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -182,9 +193,23 @@ async def set_pipeline(request: Request):
     _next_pipeline = {
         "pipeline_stt": data.get("stt", "deepgram"),
         "pipeline_tts": data.get("tts", "openai"),
+        "pipeline_llm": data.get("llm", "openai"),
+        "agent_config": data.get("config", {}),
     }
-    logger.info(f"Pipeline selected: {_next_pipeline}")
+    logger.info(f"Pipeline selected: STT={_next_pipeline['pipeline_stt']}, "
+                f"TTS={_next_pipeline['pipeline_tts']}, LLM={_next_pipeline['pipeline_llm']}")
     return {"status": "ok", "pipeline": _next_pipeline}
+
+
+@app.get("/api/config-status")
+async def config_status():
+    """Return which services have their required env vars configured."""
+    return {
+        "deepgram": bool(os.getenv("DEEPGRAM_API_KEY")),
+        "openai": bool(os.getenv("OPENAI_API_KEY")),
+        "sarvam": bool(os.getenv("SARVAM_API_KEY")),
+        "ollama_url": os.getenv("OLLAMA_BASE_URL", ""),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -196,18 +221,20 @@ async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
     pipeline_config = request.request_data or {}
     stt = pipeline_config.get("pipeline_stt", _next_pipeline.get("pipeline_stt", "deepgram"))
     tts = pipeline_config.get("pipeline_tts", _next_pipeline.get("pipeline_tts", "openai"))
-    logger.info(f"POST /api/offer - Pipeline: STT={stt}, TTS={tts}")
+    llm = pipeline_config.get("pipeline_llm", _next_pipeline.get("pipeline_llm", "openai"))
+    agent_config = _next_pipeline.get("agent_config", {})
+    logger.info(f"POST /api/offer - Pipeline: STT={stt}, TTS={tts}, LLM={llm}")
 
     async def webrtc_connection_callback(connection: SmallWebRTCConnection):
-        logger.info(f"WebRTC connection established (STT={stt}, TTS={tts})")
-        background_tasks.add_task(bot_module.run_bot, connection, stt, tts)
+        logger.info(f"WebRTC connection established (STT={stt}, TTS={tts}, LLM={llm})")
+        background_tasks.add_task(bot_module.run_bot, connection, stt, tts, llm, agent_config)
 
     try:
         answer = await small_webrtc_handler.handle_web_request(
             request=request,
             webrtc_connection_callback=webrtc_connection_callback,
         )
-        logger.info(f"SDP answer generated for {stt}+{tts}")
+        logger.info(f"SDP answer generated for {stt}+{tts}+{llm}")
         return answer
     except Exception as e:
         logger.error(f"Error handling WebRTC offer: {e}", exc_info=True)
@@ -304,6 +331,7 @@ async def get_active_flow():
             "transcript": data.get("transcript", []),
             "stt_type": data.get("stt_type"),
             "tts_type": data.get("tts_type"),
+            "llm_type": data.get("llm_type"),
             "duration": time.time() - data.get("start_time", time.time()),
         }
     return {"current_node": None, "flow_nodes": bot_module.FLOW_NODES, "transcript": []}

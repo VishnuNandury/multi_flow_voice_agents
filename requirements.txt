@@ -1,5 +1,5 @@
 # PipeCat core + integrations
-pipecat-ai[deepgram,openai,silero,webrtc]>=0.0.101
+pipecat-ai[deepgram,openai,silero,webrtc,sarvam]>=0.0.101
 
 # Pipecat Flows (structured conversation flows)
 pipecat-ai-flows
