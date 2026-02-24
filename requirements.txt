@@ -22,3 +22,10 @@ aiohttp>=3.11.0
 
 # Logging
 loguru>=0.7.3
+
+# Database
+sqlalchemy>=2.0.0
+
+# Authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4

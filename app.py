@@ -6,19 +6,24 @@
 # Serves a custom dashboard at / with 5 pipeline comparison panels.
 #
 
+import json
 import os
 import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 load_dotenv(override=True)
 
@@ -130,8 +135,47 @@ _next_pipeline: Dict[str, Any] = {
 # FastAPI app
 # ---------------------------------------------------------------------------
 
+from database import Conversation, User, get_db, init_db
+from auth import create_access_token, decode_token, verify_password
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+_security = HTTPBearer(auto_error=False)
+
+
+async def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_security),
+    db: Session = Depends(get_db),
+) -> User:
+    if not credentials:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    payload = decode_token(credentials.credentials)
+    if not payload or "sub" not in payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    user = db.query(User).filter(User.username == payload["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    return user
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schemas
+# ---------------------------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+# ---------------------------------------------------------------------------
+# Lifespan
+# ---------------------------------------------------------------------------
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db()
     yield
     await small_webrtc_handler.close()
 
@@ -182,6 +226,158 @@ async def debug_audio_config():
             "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
             "tts_voice": os.getenv("OPENAI_TTS_VOICE", "shimmer"),
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/auth/login")
+async def login(body: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == body.username).first()
+    if not user or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    token = create_access_token({"sub": user.username, "role": user.role})
+    return {"access_token": token, "token_type": "bearer", "user": {"username": user.username, "role": user.role}}
+
+
+@app.get("/auth/me")
+async def me(current_user: User = Depends(get_current_user)):
+    return {"username": current_user.username, "role": current_user.role, "email": current_user.email}
+
+
+# ---------------------------------------------------------------------------
+# Data API endpoints (all require auth)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/stats")
+async def get_stats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Dashboard KPIs aggregated from the conversations table."""
+    from sqlalchemy import func
+
+    total = db.query(func.count(Conversation.id)).scalar() or 0
+    completed = db.query(func.count(Conversation.id)).filter(Conversation.outcome.isnot(None)).scalar() or 0
+    ptp_count = db.query(func.count(Conversation.id)).filter(Conversation.outcome == "ptp").scalar() or 0
+    avg_dur = db.query(func.avg(Conversation.duration_seconds)).filter(
+        Conversation.duration_seconds.isnot(None)
+    ).scalar() or 0
+    total_cost = db.query(func.sum(Conversation.estimated_cost_usd)).scalar() or 0
+
+    # Outcome breakdown
+    outcome_rows = db.query(
+        Conversation.outcome, func.count(Conversation.id)
+    ).group_by(Conversation.outcome).all()
+    outcome_breakdown = {row[0] or "unknown": row[1] for row in outcome_rows}
+
+    # Pipeline usage breakdown (stt+tts+llm)
+    pipeline_rows = db.query(
+        Conversation.stt_type, Conversation.tts_type, Conversation.llm_type,
+        func.count(Conversation.id)
+    ).group_by(Conversation.stt_type, Conversation.tts_type, Conversation.llm_type).all()
+    pipeline_breakdown = {
+        f"{r[0]}+{r[1]}+{r[2]}": r[3] for r in pipeline_rows
+    }
+
+    # Daily counts — last 7 days
+    daily_counts = []
+    for days_ago in range(6, -1, -1):
+        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days_ago)
+        day_end = day_start + timedelta(days=1)
+        count = db.query(func.count(Conversation.id)).filter(
+            Conversation.started_at >= day_start,
+            Conversation.started_at < day_end,
+        ).scalar() or 0
+        daily_counts.append({"date": day_start.strftime("%b %d"), "count": count})
+
+    return {
+        "total": total,
+        "completed": completed,
+        "ptp_count": ptp_count,
+        "ptp_rate": round(ptp_count / completed, 3) if completed else 0,
+        "avg_duration_seconds": round(avg_dur, 1),
+        "total_cost_usd": round(total_cost, 4),
+        "active_now": len(bot_module.session_data),
+        "outcome_breakdown": outcome_breakdown,
+        "pipeline_breakdown": pipeline_breakdown,
+        "daily_counts": daily_counts,
+    }
+
+
+@app.get("/api/conversations")
+async def list_conversations(
+    page: int = 1,
+    limit: int = 20,
+    outcome: Optional[str] = None,
+    search: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Conversation).order_by(Conversation.started_at.desc())
+    if outcome:
+        q = q.filter(Conversation.outcome == outcome)
+    if search:
+        q = q.filter(Conversation.borrower_name.ilike(f"%{search}%"))
+    total = q.count()
+    rows = q.offset((page - 1) * limit).limit(limit).all()
+
+    return {
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "conversations": [
+            {
+                "id": c.id,
+                "borrower_name": c.borrower_name,
+                "account_number": c.account_number,
+                "pipeline": f"{c.stt_type}+{c.tts_type}+{c.llm_type}",
+                "stt_type": c.stt_type,
+                "tts_type": c.tts_type,
+                "llm_type": c.llm_type,
+                "outcome": c.outcome,
+                "payment_plan": c.payment_plan,
+                "payment_date": c.payment_date,
+                "duration_seconds": c.duration_seconds,
+                "estimated_cost_usd": c.estimated_cost_usd,
+                "started_at": c.started_at.isoformat() if c.started_at else None,
+            }
+            for c in rows
+        ],
+    }
+
+
+@app.get("/api/conversations/{conv_id}")
+async def get_conversation(
+    conv_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    c = db.query(Conversation).filter(Conversation.id == conv_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    transcript = json.loads(c.transcript_json) if c.transcript_json else []
+    return {
+        "id": c.id,
+        "pc_id": c.pc_id,
+        "borrower_name": c.borrower_name,
+        "account_number": c.account_number,
+        "agent_name": c.agent_name,
+        "company_name": c.company_name,
+        "language": c.language,
+        "stt_type": c.stt_type,
+        "tts_type": c.tts_type,
+        "llm_type": c.llm_type,
+        "outcome": c.outcome,
+        "payment_plan": c.payment_plan,
+        "payment_date": c.payment_date,
+        "duration_seconds": c.duration_seconds,
+        "estimated_cost_usd": c.estimated_cost_usd,
+        "started_at": c.started_at.isoformat() if c.started_at else None,
+        "ended_at": c.ended_at.isoformat() if c.ended_at else None,
+        "transcript": transcript,
     }
 
 

@@ -1,539 +1,924 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Agent - Pipeline Comparison</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { height: 100%; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0f172a; color: #e2e8f0;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Converse — Voice Agent Platform</title>
+<style>
+:root {
+  --bg:        #0b0f1a;
+  --surface:   #111827;
+  --card:      #1a2133;
+  --border:    #1f2d40;
+  --accent:    #6366f1;
+  --accent-h:  #4f46e5;
+  --green:     #10b981;
+  --amber:     #f59e0b;
+  --red:       #ef4444;
+  --blue:      #3b82f6;
+  --text:      #f1f5f9;
+  --muted:     #94a3b8;
+  --faint:     #4b5d73;
+  --sidebar-w: 220px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
 
-        /* ---- Dashboard View ---- */
-        #dashboard-view { min-height: 100vh; }
-        .header {
-            background: #1e293b; padding: 1.25rem 1.5rem;
-            border-bottom: 1px solid #334155; text-align: center;
-        }
-        .header h1 { font-size: 1.4rem; color: #f1f5f9; }
-        .header p { font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem; }
+/* ── Login ─────────────────────────────────── */
+#login-page{display:flex;align-items:center;justify-content:center;min-height:100vh;background:radial-gradient(ellipse at 50% 0%,#1a2133 0%,#0b0f1a 70%)}
+.login-card{width:340px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem 2rem}
+.login-logo{display:flex;align-items:center;gap:.6rem;font-size:1.3rem;font-weight:700;color:var(--text);margin-bottom:1.75rem}
+.login-logo span{background:var(--accent);border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:1rem}
+.login-card h2{font-size:1.1rem;margin-bottom:.3rem}
+.login-card p{color:var(--muted);font-size:.8rem;margin-bottom:1.5rem}
+.form-group{margin-bottom:.9rem}
+.form-group label{display:block;font-size:.72rem;color:var(--muted);margin-bottom:.3rem;font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+.form-group input{width:100%;padding:.6rem .8rem;border-radius:8px;border:1px solid var(--border);background:#0b0f1a;color:var(--text);font-size:.88rem;outline:none;transition:border-color .15s}
+.form-group input:focus{border-color:var(--accent)}
+#login-error{color:var(--red);font-size:.78rem;margin-bottom:.75rem;display:none}
+.btn-primary{width:100%;padding:.65rem;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:.88rem;font-weight:600;cursor:pointer;transition:background .15s}
+.btn-primary:hover{background:var(--accent-h)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
 
-        /* ---- Config Panel ---- */
-        .config-section {
-            max-width: 1000px; margin: 1rem auto 0; padding: 0 1.25rem;
-        }
-        .config-toggle-btn {
-            width: 100%; padding: 0.6rem 1rem; border-radius: 8px;
-            border: 1px solid #334155; background: #1e293b;
-            color: #94a3b8; cursor: pointer; font-size: 0.82rem;
-            font-weight: 500; display: flex; align-items: center;
-            justify-content: space-between; transition: all 0.15s;
-        }
-        .config-toggle-btn:hover { border-color: #475569; color: #f1f5f9; }
-        .config-toggle-btn .arrow { transition: transform 0.2s; }
-        .config-toggle-btn.open .arrow { transform: rotate(180deg); }
-        .config-body {
-            display: none; background: #1e293b; border: 1px solid #334155;
-            border-top: none; border-radius: 0 0 8px 8px; padding: 1rem;
-        }
-        .config-body.open { display: block; }
-        .config-row {
-            display: grid; grid-template-columns: 1fr 1fr;
-            gap: 1.25rem;
-        }
-        .config-col h3 {
-            font-size: 0.75rem; color: #64748b; text-transform: uppercase;
-            letter-spacing: 0.05em; margin-bottom: 0.6rem;
-        }
-        .config-field {
-            display: flex; flex-direction: column; gap: 0.2rem;
-            margin-bottom: 0.5rem;
-        }
-        .config-field label {
-            font-size: 0.7rem; color: #94a3b8; font-weight: 500;
-        }
-        .config-field input, .config-field select {
-            padding: 0.4rem 0.55rem; border-radius: 6px;
-            border: 1px solid #334155; background: #0f172a;
-            color: #e2e8f0; font-size: 0.8rem; outline: none;
-            transition: border-color 0.15s;
-        }
-        .config-field input:focus, .config-field select:focus {
-            border-color: #3b82f6;
-        }
-        .config-field-row {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
-        }
+/* ── App shell ──────────────────────────────── */
+#app{display:none;height:100vh;overflow:hidden}
+.shell{display:flex;height:100%}
 
-        /* ---- Pipeline Grid ---- */
-        .grid {
-            display: grid; grid-template-columns: 1fr 1fr;
-            gap: 1rem; padding: 1rem 1.25rem; max-width: 1000px; margin: 0 auto;
-        }
-        .card {
-            background: #1e293b; border-radius: 12px; padding: 1.5rem;
-            border: 1px solid #334155; transition: all 0.2s; cursor: default;
-        }
-        .card:hover { border-color: #475569; }
-        .card.card-featured {
-            grid-column: 1 / -1; border-color: #475569;
-            background: linear-gradient(135deg, #1e293b 0%, #1a2744 100%);
-        }
-        .card h2 { font-size: 1.05rem; color: #f1f5f9; margin-bottom: 0.5rem; }
-        .badges { display: flex; gap: 0.4rem; margin-bottom: 1rem; flex-wrap: wrap; }
-        .badge {
-            font-size: 0.65rem; padding: 0.2rem 0.55rem; border-radius: 9999px;
-            font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em;
-        }
-        .badge-stt { background: #1e3a5f; color: #93c5fd; }
-        .badge-tts { background: #3b1f5e; color: #c4b5fd; }
-        .badge-llm { background: #1f3b2e; color: #86efac; }
-        .card-desc {
-            font-size: 0.78rem; color: #94a3b8; margin-bottom: 1rem; line-height: 1.4;
-        }
-        .card-warn {
-            font-size: 0.7rem; color: #fbbf24; margin-bottom: 0.75rem;
-            padding: 0.4rem 0.6rem; background: rgba(251, 191, 36, 0.1);
-            border-radius: 6px; line-height: 1.3;
-        }
-        .btn {
-            padding: 0.55rem 1.25rem; border-radius: 8px; border: none;
-            cursor: pointer; font-size: 0.85rem; font-weight: 600;
-            transition: all 0.15s; width: 100%;
-        }
-        .btn-connect { background: #3b82f6; color: #fff; }
-        .btn-connect:hover { background: #2563eb; }
-        .btn-connect:disabled { background: #475569; cursor: not-allowed; }
+/* ── Sidebar ────────────────────────────────── */
+.sidebar{width:var(--sidebar-w);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-brand{padding:1.2rem 1rem;display:flex;align-items:center;gap:.6rem;border-bottom:1px solid var(--border)}
+.brand-icon{background:var(--accent);border-radius:8px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:.85rem;flex-shrink:0}
+.brand-name{font-weight:700;font-size:.95rem;letter-spacing:.02em}
+.brand-tag{font-size:.6rem;color:var(--accent);font-weight:600;background:rgba(99,102,241,.12);padding:.1rem .35rem;border-radius:4px;margin-left:auto}
+.nav{flex:1;padding:.75rem .5rem;display:flex;flex-direction:column;gap:.15rem}
+.nav-item{display:flex;align-items:center;gap:.6rem;padding:.55rem .75rem;border-radius:8px;color:var(--muted);text-decoration:none;font-size:.82rem;font-weight:500;cursor:pointer;transition:all .15s;border:none;background:none;width:100%;text-align:left}
+.nav-item:hover{background:rgba(255,255,255,.05);color:var(--text)}
+.nav-item.active{background:rgba(99,102,241,.15);color:var(--accent)}
+.nav-item svg{width:16px;height:16px;flex-shrink:0;opacity:.7}
+.nav-item.active svg{opacity:1}
+.nav-section{font-size:.65rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;padding:.5rem .75rem .25rem;font-weight:600}
+.sidebar-footer{padding:.75rem .5rem;border-top:1px solid var(--border)}
+.user-row{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;border-radius:8px}
+.avatar{width:26px;height:26px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;flex-shrink:0}
+.user-info{flex:1;min-width:0}
+.user-name{font-size:.78rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.user-role{font-size:.65rem;color:var(--muted)}
+.btn-logout{background:none;border:none;color:var(--muted);cursor:pointer;padding:.25rem;border-radius:4px;transition:color .15s}
+.btn-logout:hover{color:var(--red)}
 
-        /* ---- Client View ---- */
-        #client-view {
-            display: none; flex-direction: column; height: 100vh;
-        }
-        .client-bar {
-            background: #1e293b; padding: 0.6rem 1rem;
-            display: flex; align-items: center; justify-content: space-between;
-            border-bottom: 1px solid #334155; flex-shrink: 0;
-        }
-        .client-bar-info {
-            display: flex; align-items: center; gap: 0.75rem;
-            font-size: 0.85rem;
-        }
-        .client-bar-info .pipeline-label { color: #f1f5f9; font-weight: 600; }
-        .client-bar-info .badge { font-size: 0.6rem; }
-        .btn-back {
-            padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid #475569;
-            background: transparent; color: #94a3b8; cursor: pointer;
-            font-size: 0.8rem; font-weight: 500; transition: all 0.15s;
-        }
-        .btn-back:hover { background: #334155; color: #f1f5f9; }
+/* ── Main area ──────────────────────────────── */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:.7rem 1.5rem;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.breadcrumb{font-size:.82rem;color:var(--muted);display:flex;align-items:center;gap:.4rem}
+.breadcrumb strong{color:var(--text);font-weight:600}
+.active-indicator{display:flex;align-items:center;gap:.45rem;font-size:.78rem;color:var(--muted)}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block}
+.pulse.on{animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+.content{flex:1;overflow-y:auto;padding:1.5rem}
 
-        /* ---- Flow Steps Bar ---- */
-        .flow-bar {
-            background: #1e293b; padding: 0.65rem 1rem;
-            border-bottom: 1px solid #334155; flex-shrink: 0;
-            display: flex; align-items: center; justify-content: center;
-            gap: 0; overflow-x: auto;
-        }
-        .flow-step {
-            display: flex; align-items: center; gap: 0;
-            white-space: nowrap;
-        }
-        .flow-dot {
-            width: 26px; height: 26px; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 0.6rem; font-weight: 700;
-            border: 2px solid #475569; background: transparent;
-            color: #64748b; transition: all 0.3s;
-            flex-shrink: 0;
-        }
-        .flow-dot.active {
-            border-color: #3b82f6; background: #3b82f6; color: #fff;
-            box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
-        }
-        .flow-dot.done {
-            border-color: #22c55e; background: #22c55e; color: #fff;
-        }
-        .flow-label {
-            font-size: 0.62rem; color: #64748b; margin-left: 0.3rem;
-            margin-right: 0.4rem; transition: color 0.3s;
-        }
-        .flow-label.active { color: #93c5fd; font-weight: 600; }
-        .flow-label.done { color: #86efac; }
-        .flow-connector {
-            width: 20px; height: 2px; background: #334155;
-            margin: 0 0.1rem; flex-shrink: 0;
-            transition: background 0.3s;
-        }
-        .flow-connector.done { background: #22c55e; }
+/* ── Cards / KPIs ───────────────────────────── */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem}
+.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem 1.5rem}
+.kpi-label{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:.5rem}
+.kpi-value{font-size:1.75rem;font-weight:700;color:var(--text);line-height:1}
+.kpi-sub{font-size:.7rem;color:var(--muted);margin-top:.35rem}
+.kpi-value.green{color:var(--green)}
+.kpi-value.amber{color:var(--amber)}
 
-        /* ---- Main Content (full-width iframe) ---- */
-        #client-iframe {
-            flex: 1; border: none; width: 100%; background: #0f172a;
-        }
+/* ── Section header ─────────────────────────── */
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem}
+.section-title{font-size:.88rem;font-weight:600;color:var(--text)}
+.section-action{font-size:.75rem;color:var(--accent);cursor:pointer;background:none;border:none;padding:0}
+.section-action:hover{text-decoration:underline}
 
-        @media (max-width: 768px) {
-            .grid { grid-template-columns: 1fr; padding: 0.75rem; }
-            .config-row { grid-template-columns: 1fr; }
-            .config-field-row { grid-template-columns: 1fr; }
-        }
-    </style>
+/* ── Table ──────────────────────────────────── */
+.table-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:1.5rem}
+.data-table{width:100%;border-collapse:collapse}
+.data-table th{padding:.65rem 1rem;text-align:left;font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);background:rgba(0,0,0,.15)}
+.data-table td{padding:.7rem 1rem;font-size:.8rem;border-bottom:1px solid rgba(31,45,64,.5);vertical-align:middle}
+.data-table tr:last-child td{border-bottom:none}
+.data-table tr:hover td{background:rgba(255,255,255,.02)}
+.empty-row td{text-align:center;color:var(--faint);padding:2rem}
+
+/* ── Badges ─────────────────────────────────── */
+.badge{display:inline-flex;align-items:center;font-size:.62rem;font-weight:600;padding:.2rem .5rem;border-radius:9999px;text-transform:uppercase;letter-spacing:.03em}
+.badge-stt{background:rgba(59,130,246,.12);color:#60a5fa}
+.badge-tts{background:rgba(167,139,250,.12);color:#a78bfa}
+.badge-llm{background:rgba(16,185,129,.12);color:#34d399}
+.badge-ptp{background:rgba(16,185,129,.12);color:#34d399}
+.badge-callback{background:rgba(245,158,11,.12);color:#fbbf24}
+.badge-incomplete{background:rgba(75,93,115,.12);color:#94a3b8}
+.badge-wrong_person{background:rgba(239,68,68,.12);color:#f87171}
+.badge-active{background:rgba(99,102,241,.12);color:#818cf8}
+
+/* ── Pipeline cards ─────────────────────────── */
+.pipeline-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem}
+.pipeline-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;transition:border-color .15s}
+.pipeline-card:hover{border-color:var(--faint)}
+.pipeline-card.featured{border-color:rgba(99,102,241,.3);background:linear-gradient(135deg,#1a2133 0%,#1a1f35 100%);grid-column:1/-1}
+.pipeline-card h3{font-size:.9rem;font-weight:600;margin-bottom:.5rem}
+.pipeline-badges{display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.75rem}
+.pipeline-desc{font-size:.75rem;color:var(--muted);margin-bottom:1rem;line-height:1.45}
+.pipeline-warn{font-size:.7rem;color:var(--amber);background:rgba(245,158,11,.08);border-radius:6px;padding:.35rem .5rem;margin-bottom:.75rem}
+.btn-connect{width:100%;padding:.55rem;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s}
+.btn-connect:hover{background:var(--accent-h)}
+.btn-connect:disabled{background:var(--faint);cursor:not-allowed;opacity:.6}
+
+/* ── Config panel ───────────────────────────── */
+.config-toggle-btn{width:100%;padding:.55rem 1rem;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--muted);cursor:pointer;font-size:.78rem;font-weight:500;display:flex;align-items:center;justify-content:space-between;margin-bottom:.1rem;transition:all .15s}
+.config-toggle-btn:hover{border-color:var(--faint);color:var(--text)}
+.config-toggle-btn.open .arrow{transform:rotate(180deg)}
+.config-toggle-btn .arrow{transition:transform .2s}
+.config-panel-body{display:none;background:var(--card);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:1rem;margin-bottom:1rem}
+.config-panel-body.open{display:block}
+.cfg-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.cfg-col h4{font-size:.65rem;color:var(--faint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.6rem;font-weight:600}
+.cfg-field{margin-bottom:.5rem}
+.cfg-field label{display:block;font-size:.68rem;color:var(--muted);margin-bottom:.22rem;font-weight:500}
+.cfg-field input,.cfg-field select{width:100%;padding:.38rem .55rem;border-radius:6px;border:1px solid var(--border);background:#0b0f1a;color:var(--text);font-size:.78rem;outline:none;transition:border-color .15s}
+.cfg-field input:focus,.cfg-field select:focus{border-color:var(--accent)}
+.cfg-field-row{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+
+/* ── Flow bar (in agent page) ───────────────── */
+.flow-bar{display:flex;align-items:center;justify-content:center;padding:.65rem 1rem;background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:1rem;overflow-x:auto;gap:0}
+.flow-step{display:flex;align-items:center;white-space:nowrap}
+.flow-dot{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:700;border:2px solid var(--faint);background:transparent;color:var(--faint);transition:all .3s;flex-shrink:0}
+.flow-dot.active{border-color:var(--blue);background:var(--blue);color:#fff;box-shadow:0 0 10px rgba(59,130,246,.4)}
+.flow-dot.done{border-color:var(--green);background:var(--green);color:#fff}
+.flow-label{font-size:.6rem;color:var(--faint);margin:0 .3rem;transition:color .3s}
+.flow-label.active{color:#93c5fd;font-weight:600}
+.flow-label.done{color:#6ee7b7}
+.flow-connector{width:18px;height:2px;background:var(--border);flex-shrink:0;transition:background .3s}
+.flow-connector.done{background:var(--green)}
+
+/* ── iframe container ───────────────────────── */
+.client-bar{display:flex;align-items:center;justify-content:space-between;padding:.55rem 1rem;background:var(--surface);border:1px solid var(--border);border-radius:10px 10px 0 0;margin-bottom:0}
+.client-bar-info{display:flex;align-items:center;gap:.6rem;font-size:.8rem}
+.client-bar strong{color:var(--text)}
+.btn-back{padding:.35rem .75rem;border-radius:6px;border:1px solid var(--faint);background:none;color:var(--muted);font-size:.75rem;cursor:pointer;transition:all .15s}
+.btn-back:hover{background:var(--border);color:var(--text)}
+#client-iframe{width:100%;border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;background:var(--bg)}
+
+/* ── Conversations filters ───────────────────── */
+.filter-bar{display:flex;gap:.75rem;margin-bottom:1rem;align-items:center}
+.filter-bar input,.filter-bar select{padding:.4rem .7rem;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.8rem;outline:none}
+.filter-bar input:focus,.filter-bar select:focus{border-color:var(--accent)}
+.filter-bar input{flex:1}
+.btn-view{padding:.3rem .65rem;border-radius:6px;border:1px solid var(--faint);background:none;color:var(--muted);font-size:.72rem;cursor:pointer;transition:all .15s}
+.btn-view:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* ── Transcript modal ───────────────────────── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:1000;padding:1rem}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;width:min(640px,100%);max-height:80vh;display:flex;flex-direction:column}
+.modal-header{padding:1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-size:.95rem;font-weight:600}
+.modal-close{background:none;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer;padding:.2rem}
+.modal-close:hover{color:var(--text)}
+.modal-meta{padding:.75rem 1.25rem;border-bottom:1px solid var(--border);display:flex;gap:1rem;flex-wrap:wrap;font-size:.75rem;color:var(--muted)}
+.modal-meta span{display:flex;align-items:center;gap:.3rem}
+.modal-body{overflow-y:auto;padding:1rem 1.25rem;display:flex;flex-direction:column;gap:.6rem}
+.msg{padding:.6rem .85rem;border-radius:10px;font-size:.8rem;line-height:1.4;max-width:88%}
+.msg.user{background:rgba(59,130,246,.12);color:#93c5fd;align-self:flex-start;border-radius:10px 10px 10px 2px}
+.msg.assistant{background:rgba(99,102,241,.12);color:#c4b5fd;align-self:flex-end;border-radius:10px 10px 2px 10px}
+.msg-role{font-size:.62rem;font-weight:600;opacity:.7;margin-bottom:.2rem;text-transform:uppercase}
+
+/* ── Analytics ───────────────────────────────── */
+.analytics-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem}
+.analytics-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem}
+.analytics-card h4{font-size:.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:1rem}
+.bar-row{display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem;font-size:.75rem}
+.bar-label{width:100px;color:var(--muted);text-align:right;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-track{flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px;transition:width .4s}
+.bar-fill.green{background:var(--green)}
+.bar-fill.amber{background:var(--amber)}
+.bar-fill.red{background:var(--red)}
+.bar-fill.blue{background:var(--blue)}
+.bar-fill.accent{background:var(--accent)}
+.bar-count{width:28px;color:var(--muted);font-size:.68rem;text-align:right;flex-shrink:0}
+.volume-chart{display:flex;align-items:flex-end;gap:4px;height:80px}
+.vol-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px}
+.vol-bar{width:100%;background:var(--accent);border-radius:3px 3px 0 0;min-height:2px;transition:height .3s;opacity:.8}
+.vol-label{font-size:.58rem;color:var(--faint)}
+
+/* ── Settings ────────────────────────────────── */
+.settings-section{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;margin-bottom:1rem}
+.settings-section h3{font-size:.82rem;font-weight:600;margin-bottom:1rem;padding-bottom:.6rem;border-bottom:1px solid var(--border)}
+.api-key-grid{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+.api-key-item{display:flex;align-items:center;justify-content:space-between;padding:.6rem .85rem;border-radius:8px;border:1px solid var(--border);background:#0b0f1a}
+.api-key-name{font-size:.78rem;font-weight:600}
+.api-key-status{font-size:.7rem;display:flex;align-items:center;gap:.3rem}
+.dot-ok{color:var(--green)}
+.dot-miss{color:var(--red)}
+.settings-form{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+.settings-field{display:flex;flex-direction:column;gap:.2rem}
+.settings-field label{font-size:.68rem;color:var(--muted);font-weight:500}
+.settings-field input,.settings-field select{padding:.4rem .6rem;border-radius:6px;border:1px solid var(--border);background:#0b0f1a;color:var(--text);font-size:.8rem;outline:none}
+.settings-field input:focus{border-color:var(--accent)}
+.btn-save{margin-top:1rem;padding:.5rem 1.25rem;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s}
+.btn-save:hover{background:var(--accent-h)}
+
+/* ── Active call banner ──────────────────────── */
+.active-banner{display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);border-radius:10px;margin-bottom:1rem;font-size:.8rem}
+.active-banner strong{color:var(--green)}
+
+/* ── Pagination ──────────────────────────────── */
+.pagination{display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;border-top:1px solid var(--border);font-size:.75rem;color:var(--muted)}
+.page-btns{display:flex;gap:.4rem}
+.btn-page{padding:.3rem .65rem;border-radius:6px;border:1px solid var(--faint);background:none;color:var(--muted);font-size:.75rem;cursor:pointer;transition:all .15s}
+.btn-page:hover,.btn-page.current{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+@media(max-width:900px){
+  .sidebar{display:none}
+  .kpi-grid{grid-template-columns:1fr 1fr}
+  .pipeline-grid{grid-template-columns:1fr}
+  .analytics-grid{grid-template-columns:1fr}
+  .settings-form,.api-key-grid,.cfg-row{grid-template-columns:1fr}
+}
+</style>
 </head>
 <body>
-    <!-- Dashboard: config + pipeline selector grid -->
-    <div id="dashboard-view">
-        <div class="header">
-            <h1>Loan Collection Agent &mdash; Pipeline Comparison</h1>
-            <p>Configure the agent, select a pipeline, and start a voice conversation.</p>
-        </div>
 
-        <!-- Agent Configuration Panel -->
-        <div class="config-section">
-            <button class="config-toggle-btn" id="config-toggle" onclick="toggleConfig()">
-                <span>Agent Configuration</span>
-                <span class="arrow">&#9660;</span>
-            </button>
-            <div class="config-body" id="config-body">
-                <div class="config-row">
-                    <div class="config-col">
-                        <h3>Agent Settings</h3>
-                        <div class="config-field">
-                            <label>Agent Name</label>
-                            <input type="text" id="cfg-agent-name" value="Priya">
-                        </div>
-                        <div class="config-field">
-                            <label>Company Name</label>
-                            <input type="text" id="cfg-company" value="QuickFinance Ltd.">
-                        </div>
-                        <div class="config-field">
-                            <label>Language</label>
-                            <select id="cfg-language">
-                                <option value="hinglish" selected>Hinglish (Hindi + English)</option>
-                                <option value="hindi">Hindi</option>
-                                <option value="english">English</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="config-col">
-                        <h3>Borrower Scenario</h3>
-                        <div class="config-field">
-                            <label>Borrower Name</label>
-                            <input type="text" id="cfg-borrower" value="Rajesh Kumar">
-                        </div>
-                        <div class="config-field-row">
-                            <div class="config-field">
-                                <label>EMI Amount (Rs.)</label>
-                                <input type="text" id="cfg-emi" value="5,280">
-                            </div>
-                            <div class="config-field">
-                                <label>Total Due (Rs.)</label>
-                                <input type="text" id="cfg-total" value="11,760">
-                            </div>
-                        </div>
-                        <div class="config-field-row">
-                            <div class="config-field">
-                                <label>Overdue Months</label>
-                                <input type="text" id="cfg-overdue" value="2">
-                            </div>
-                            <div class="config-field">
-                                <label>Account Number</label>
-                                <input type="text" id="cfg-account" value="QF-2024-78432">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+<!-- ═══════════════════ LOGIN PAGE ═══════════════════ -->
+<div id="login-page">
+  <div class="login-card">
+    <div class="login-logo"><span>🎙</span> Converse</div>
+    <h2>Welcome back</h2>
+    <p>Sign in to your voice agent platform</p>
+    <div id="login-error"></div>
+    <div class="form-group"><label>Username</label><input id="luser" type="text" placeholder="admin" autocomplete="username"></div>
+    <div class="form-group"><label>Password</label><input id="lpass" type="password" placeholder="••••••••" autocomplete="current-password"></div>
+    <button class="btn-primary" id="login-btn" onclick="doLogin()">Sign In</button>
+  </div>
+</div>
 
-        <div class="grid" id="grid"></div>
+<!-- ═══════════════════ APP SHELL ═══════════════════ -->
+<div id="app">
+  <div class="shell">
+
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon">🎙</div>
+        <span class="brand-name">Converse</span>
+        <span class="brand-tag">v2</span>
+      </div>
+
+      <div class="nav">
+        <span class="nav-section">Main</span>
+        <button class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Dashboard
+        </button>
+        <button class="nav-item" data-page="agent" onclick="navigate('agent')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          Voice Agent
+        </button>
+        <button class="nav-item" data-page="conversations" onclick="navigate('conversations')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Conversations
+        </button>
+        <button class="nav-item" data-page="analytics" onclick="navigate('analytics')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          Analytics
+        </button>
+        <span class="nav-section" style="margin-top:.5rem">Account</span>
+        <button class="nav-item" data-page="settings" onclick="navigate('settings')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </button>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="user-row">
+          <div class="avatar" id="sidebar-avatar">A</div>
+          <div class="user-info">
+            <div class="user-name" id="sidebar-username">Admin</div>
+            <div class="user-role" id="sidebar-role">Administrator</div>
+          </div>
+          <button class="btn-logout" onclick="doLogout()" title="Sign out">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main -->
+    <div class="main">
+      <div class="topbar">
+        <div class="breadcrumb"><strong id="page-title">Dashboard</strong></div>
+        <div class="active-indicator">
+          <span class="pulse" id="active-pulse"></span>
+          <span id="active-label">No active call</span>
+        </div>
+      </div>
+      <div class="content" id="content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ TRANSCRIPT MODAL ═══════════════════ -->
+<div id="transcript-modal" class="modal-overlay" style="display:none" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 id="modal-title">Conversation Transcript</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-meta" id="modal-meta"></div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// Constants
+// ═══════════════════════════════════════════════════════════════
+const PIPELINES = [
+  { stt:'deepgram', tts:'openai',  llm:'openai',  label:'Deepgram + OpenAI TTS',  desc:'Streaming STT via Deepgram Nova-3 with OpenAI voice synthesis. Best overall quality.', requires:['deepgram','openai'] },
+  { stt:'deepgram', tts:'edge',    llm:'openai',  label:'Deepgram + Edge TTS',     desc:'Deepgram Nova-3 STT with free Microsoft Edge TTS. Excellent Hindi pronunciation.', requires:['deepgram','openai'] },
+  { stt:'whisper',  tts:'openai',  llm:'openai',  label:'Whisper + OpenAI TTS',    desc:'OpenAI Whisper (gpt-4o-transcribe) STT with OpenAI voice synthesis.', requires:['openai'] },
+  { stt:'whisper',  tts:'edge',    llm:'openai',  label:'Whisper + Edge TTS',      desc:'OpenAI Whisper STT with free Microsoft Edge TTS.', requires:['openai'] },
+  { stt:'sarvam',   tts:'sarvam',  llm:'ollama',  label:'Sarvam AI + Ollama/Groq', desc:'Indian-made Sarvam AI (saarika STT + bulbul TTS) with Ollama or Groq LLM. Best for Indian languages.', requires:['sarvam'], featured:true },
+];
+
+const FLOW_NODES = [
+  {id:'greeting',label:'Greeting'},{id:'overdue_info',label:'Overdue Info'},
+  {id:'understand_situation',label:'Situation'},{id:'payment_options',label:'Options'},
+  {id:'commitment',label:'Commitment'},{id:'promise_to_pay',label:'PTP'},{id:'end',label:'Complete'},
+];
+
+// ═══════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════
+let token = localStorage.getItem('token') || '';
+let currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+let currentPage = 'dashboard';
+let pollInterval = null;
+let convPage = 1;
+let convFilter = { outcome: '', search: '' };
+let configStatus = {};
+let activeCall = false;
+
+// ═══════════════════════════════════════════════════════════════
+// API helper
+// ═══════════════════════════════════════════════════════════════
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { 'Content-Type':'application/json', ...(token ? {'Authorization':'Bearer '+token} : {}), ...(opts.headers||{}) },
+  });
+  if (res.status === 401) { doLogout(); return null; }
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Auth
+// ═══════════════════════════════════════════════════════════════
+document.getElementById('lpass').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+document.getElementById('luser').addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('lpass').focus(); });
+
+async function doLogin() {
+  const btn = document.getElementById('login-btn');
+  const err = document.getElementById('login-error');
+  const username = document.getElementById('luser').value.trim();
+  const password = document.getElementById('lpass').value;
+  err.style.display = 'none';
+  if (!username || !password) { err.textContent = 'Please enter username and password.'; err.style.display='block'; return; }
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    const data = await fetch('/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username,password}) });
+    if (!data.ok) { const e = await data.json(); throw new Error(e.detail || 'Invalid credentials'); }
+    const json = await data.json();
+    token = json.access_token;
+    currentUser = json.user;
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(currentUser));
+    showApp();
+  } catch(e) {
+    err.textContent = e.message;
+    err.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Sign In';
+  }
+}
+
+function doLogout() {
+  token = ''; currentUser = {};
+  localStorage.removeItem('token'); localStorage.removeItem('user');
+  if (pollInterval) clearInterval(pollInterval);
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-page').style.display = 'flex';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════════════
+window.addEventListener('load', () => {
+  if (token) {
+    // Verify token is still valid
+    fetch('/auth/me', { headers: {'Authorization':'Bearer '+token} }).then(r => {
+      if (r.ok) showApp();
+      else doLogout();
+    }).catch(() => doLogout());
+  }
+});
+
+async function showApp() {
+  document.getElementById('login-page').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  // Set sidebar user info
+  const uname = currentUser.username || 'Admin';
+  document.getElementById('sidebar-username').textContent = uname;
+  document.getElementById('sidebar-role').textContent = currentUser.role === 'admin' ? 'Administrator' : 'User';
+  document.getElementById('sidebar-avatar').textContent = uname[0].toUpperCase();
+  // Fetch config status once
+  try { configStatus = await api('/api/config-status') || {}; } catch(e) {}
+  // Navigate to current page
+  const hash = location.hash.replace('#','') || 'dashboard';
+  navigate(hash);
+  // Start active-call polling
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(pollActiveFlow, 2000);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Router
+// ═══════════════════════════════════════════════════════════════
+const PAGE_TITLES = { dashboard:'Dashboard', agent:'Voice Agent', conversations:'Conversations', analytics:'Analytics', settings:'Settings' };
+
+function navigate(page) {
+  if (!['dashboard','agent','conversations','analytics','settings'].includes(page)) page = 'dashboard';
+  currentPage = page;
+  location.hash = page;
+  document.getElementById('page-title').textContent = PAGE_TITLES[page];
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === page);
+  });
+  // If leaving agent page while in a call, clean up
+  if (page !== 'agent' && activeCall) {
+    document.getElementById('client-iframe')?.remove();
+    activeCall = false;
+  }
+  const content = document.getElementById('content');
+  ({
+    dashboard: renderDashboard,
+    agent: renderAgent,
+    conversations: renderConversations,
+    analytics: renderAnalytics,
+    settings: renderSettings,
+  }[page])(content);
+}
+
+window.addEventListener('hashchange', () => {
+  if (token) navigate(location.hash.replace('#','') || 'dashboard');
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Dashboard
+// ═══════════════════════════════════════════════════════════════
+async function renderDashboard(el) {
+  el.innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">Total Calls</div><div class="kpi-value" id="kpi-total">—</div><div class="kpi-sub">All time</div></div>
+      <div class="kpi-card"><div class="kpi-label">PTP Rate</div><div class="kpi-value green" id="kpi-ptp">—</div><div class="kpi-sub">Completed calls</div></div>
+      <div class="kpi-card"><div class="kpi-label">Avg Duration</div><div class="kpi-value amber" id="kpi-dur">—</div><div class="kpi-sub">Per call</div></div>
+      <div class="kpi-card"><div class="kpi-label">Est. Cost</div><div class="kpi-value" id="kpi-cost">—</div><div class="kpi-sub">All time (USD)</div></div>
+    </div>
+    <div id="active-banner-area"></div>
+    <div class="section-header">
+      <span class="section-title">Recent Conversations</span>
+      <button class="section-action" onclick="navigate('conversations')">View all →</button>
+    </div>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Borrower</th><th>Pipeline</th><th>Outcome</th><th>Duration</th><th>Cost</th><th>Date</th></tr></thead>
+      <tbody id="recent-rows"><tr class="empty-row"><td colspan="6">Loading…</td></tr></tbody>
+    </table></div>`;
+
+  try {
+    const stats = await api('/api/stats');
+    if (!stats) return;
+    document.getElementById('kpi-total').textContent = stats.total;
+    document.getElementById('kpi-ptp').textContent = stats.ptp_count + ' / ' + (stats.ptp_rate*100).toFixed(0)+'%';
+    document.getElementById('kpi-dur').textContent = fmtDuration(stats.avg_duration_seconds);
+    document.getElementById('kpi-cost').textContent = '$' + stats.total_cost_usd.toFixed(4);
+
+    if (stats.active_now > 0) {
+      document.getElementById('active-banner-area').innerHTML = `
+        <div class="active-banner"><span class="pulse on"></span><strong>${stats.active_now} active call</strong> in progress — <a href="#agent" onclick="navigate('agent')" style="color:var(--accent);text-decoration:none">Monitor →</a></div>`;
+    }
+
+    const convs = await api('/api/conversations?limit=10');
+    const tbody = document.getElementById('recent-rows');
+    if (!convs || !convs.conversations.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No conversations yet. <a href="#agent" onclick="navigate(\'agent\')" style="color:var(--accent)">Start a call →</a></td></tr>';
+    } else {
+      tbody.innerHTML = convs.conversations.map(c => `
+        <tr>
+          <td>${c.borrower_name || '—'}</td>
+          <td><span class="badge badge-stt">${c.stt_type}</span> <span class="badge badge-tts">${c.tts_type}</span></td>
+          <td><span class="badge badge-${c.outcome||'incomplete'}">${fmtOutcome(c.outcome)}</span></td>
+          <td>${fmtDuration(c.duration_seconds)}</td>
+          <td>$${(c.estimated_cost_usd||0).toFixed(4)}</td>
+          <td>${fmtDate(c.started_at)}</td>
+        </tr>`).join('');
+    }
+  } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Voice Agent
+// ═══════════════════════════════════════════════════════════════
+function renderAgent(el) {
+  el.innerHTML = `
+    <button class="config-toggle-btn" id="cfg-toggle" onclick="toggleConfig()">
+      <span>Agent Configuration</span><span class="arrow">▼</span>
+    </button>
+    <div class="config-panel-body" id="cfg-body">
+      <div class="cfg-row">
+        <div class="cfg-col">
+          <h4>Agent Settings</h4>
+          <div class="cfg-field"><label>Agent Name</label><input id="cfg-agent" value="Priya"></div>
+          <div class="cfg-field"><label>Company</label><input id="cfg-company" value="QuickFinance Ltd."></div>
+          <div class="cfg-field"><label>Language</label>
+            <select id="cfg-lang"><option value="hinglish">Hinglish (Hindi + English)</option><option value="hindi">Hindi</option><option value="english">English</option></select>
+          </div>
+        </div>
+        <div class="cfg-col">
+          <h4>Borrower Scenario</h4>
+          <div class="cfg-field"><label>Borrower Name</label><input id="cfg-borrower" value="Rajesh Kumar"></div>
+          <div class="cfg-field-row">
+            <div class="cfg-field"><label>EMI (Rs.)</label><input id="cfg-emi" value="5,280"></div>
+            <div class="cfg-field"><label>Total Due (Rs.)</label><input id="cfg-total" value="11,760"></div>
+          </div>
+          <div class="cfg-field-row">
+            <div class="cfg-field"><label>Overdue Months</label><input id="cfg-months" value="2"></div>
+            <div class="cfg-field"><label>Account No.</label><input id="cfg-account" value="QF-2024-78432"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pipeline-grid" id="pipeline-grid"></div>
+    <div id="live-area"></div>`;
+  buildPipelineCards();
+}
+
+function toggleConfig() {
+  document.getElementById('cfg-toggle').classList.toggle('open');
+  document.getElementById('cfg-body').classList.toggle('open');
+}
+
+function buildPipelineCards() {
+  const grid = document.getElementById('pipeline-grid');
+  if (!grid) return;
+  grid.innerHTML = PIPELINES.map((p, i) => {
+    const missing = (p.requires||[]).filter(k => !configStatus[k]);
+    const warn = missing.length > 0;
+    const warnHtml = warn ? `<div class="pipeline-warn">⚠ Requires: ${missing.map(k=>k.toUpperCase()+'_API_KEY').join(', ')}</div>` : '';
+    const llmBadge = p.llm !== 'openai' ? `<span class="badge badge-llm">LLM: ${p.llm}</span>` : '';
+    return `<div class="pipeline-card ${p.featured?'featured':''}">
+      <h3>${p.label}</h3>
+      <div class="pipeline-badges"><span class="badge badge-stt">STT: ${p.stt}</span><span class="badge badge-tts">TTS: ${p.tts}</span>${llmBadge}</div>
+      <div class="pipeline-desc">${p.desc}</div>
+      ${warnHtml}
+      <button class="btn-connect" ${warn?'disabled':''} onclick="selectPipeline(${i})">${warn?'Unavailable':'Connect'}</button>
+    </div>`;
+  }).join('');
+}
+
+async function selectPipeline(idx) {
+  const p = PIPELINES[idx];
+  const config = {
+    agent_name: document.getElementById('cfg-agent')?.value || 'Priya',
+    company_name: document.getElementById('cfg-company')?.value || 'QuickFinance Ltd.',
+    language: document.getElementById('cfg-lang')?.value || 'hinglish',
+    borrower_name: document.getElementById('cfg-borrower')?.value || 'Rajesh Kumar',
+    emi_amount: document.getElementById('cfg-emi')?.value || '5,280',
+    total_due: document.getElementById('cfg-total')?.value || '11,760',
+    overdue_months: document.getElementById('cfg-months')?.value || '2',
+    account_number: document.getElementById('cfg-account')?.value || 'QF-2024-78432',
+  };
+  await api('/set-pipeline', { method:'POST', body: JSON.stringify({ stt:p.stt, tts:p.tts, llm:p.llm, config }) });
+  showLiveSession(p);
+}
+
+function showLiveSession(p) {
+  activeCall = true;
+  const liveArea = document.getElementById('live-area');
+  const llmBadge = p.llm !== 'openai' ? `<span class="badge badge-llm">LLM: ${p.llm}</span>` : '';
+  liveArea.innerHTML = `
+    <div class="client-bar">
+      <div class="client-bar-info">
+        <strong>${p.label}</strong>
+        <span class="badge badge-stt">STT: ${p.stt}</span>
+        <span class="badge badge-tts">TTS: ${p.tts}</span>
+        ${llmBadge}
+      </div>
+      <button class="btn-back" onclick="endLiveSession()">End Call</button>
+    </div>
+    <div class="flow-bar" id="flow-bar-live"></div>
+    <iframe id="client-iframe" src="/client/" allow="microphone" style="width:100%;height:560px;border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;background:var(--bg)"></iframe>`;
+  buildFlowBar('flow-bar-live');
+  // Scroll to it
+  liveArea.scrollIntoView({ behavior:'smooth' });
+}
+
+function endLiveSession() {
+  activeCall = false;
+  const iframe = document.getElementById('client-iframe');
+  if (iframe) iframe.src = 'about:blank';
+  document.getElementById('live-area').innerHTML = '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Flow Bar
+// ═══════════════════════════════════════════════════════════════
+function buildFlowBar(containerId) {
+  const bar = document.getElementById(containerId);
+  if (!bar) return;
+  bar.innerHTML = '';
+  FLOW_NODES.forEach((node, i) => {
+    const step = document.createElement('div');
+    step.className = 'flow-step';
+    step.innerHTML = `<div class="flow-dot" id="fd-${node.id}">${i+1}</div><span class="flow-label" id="fl-${node.id}">${node.label}</span>`;
+    bar.appendChild(step);
+    if (i < FLOW_NODES.length - 1) {
+      const conn = document.createElement('div');
+      conn.className = 'flow-connector'; conn.id = `fc-${i}`;
+      bar.appendChild(conn);
+    }
+  });
+}
+
+function updateFlowBar(currentNode) {
+  const idx = FLOW_NODES.findIndex(n => n.id === currentNode);
+  if (idx < 0) return;
+  FLOW_NODES.forEach((node, i) => {
+    const dot = document.getElementById(`fd-${node.id}`);
+    const lbl = document.getElementById(`fl-${node.id}`);
+    const conn = document.getElementById(`fc-${i}`);
+    if (!dot) return;
+    dot.className = 'flow-dot' + (i < idx ? ' done' : i === idx ? ' active' : '');
+    if (lbl) lbl.className = 'flow-label' + (i < idx ? ' done' : i === idx ? ' active' : '');
+    if (conn) conn.classList.toggle('done', i < idx);
+  });
+}
+
+async function pollActiveFlow() {
+  // Update active call indicator
+  try {
+    const data = await fetch('/api/active-flow').then(r=>r.json());
+    const active = data && data.current_node;
+    const pulse = document.getElementById('active-pulse');
+    const label = document.getElementById('active-label');
+    if (pulse && label) {
+      if (active) { pulse.classList.add('on'); label.textContent = 'Active call'; }
+      else { pulse.classList.remove('on'); label.textContent = 'No active call'; }
+    }
+    if (active && currentPage === 'agent') updateFlowBar(data.current_node);
+  } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Conversations
+// ═══════════════════════════════════════════════════════════════
+async function renderConversations(el) {
+  el.innerHTML = `
+    <div class="filter-bar">
+      <input type="text" id="conv-search" placeholder="Search borrower name…" value="${convFilter.search}" oninput="debounceSearch()">
+      <select id="conv-outcome" onchange="applyFilter()">
+        <option value="">All outcomes</option>
+        <option value="ptp" ${convFilter.outcome==='ptp'?'selected':''}>PTP</option>
+        <option value="callback" ${convFilter.outcome==='callback'?'selected':''}>Callback</option>
+        <option value="wrong_person" ${convFilter.outcome==='wrong_person'?'selected':''}>Wrong Person</option>
+        <option value="incomplete" ${convFilter.outcome==='incomplete'?'selected':''}>Incomplete</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Borrower</th><th>Pipeline</th><th>Outcome</th><th>Payment Plan</th><th>Duration</th><th>Cost</th><th>Date</th><th></th></tr></thead>
+        <tbody id="conv-rows"><tr class="empty-row"><td colspan="9">Loading…</td></tr></tbody>
+      </table>
+      <div class="pagination" id="conv-pagination"></div>
+    </div>`;
+  await loadConversations();
+}
+
+let _searchTimer;
+function debounceSearch() {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(applyFilter, 400);
+}
+
+async function applyFilter() {
+  convFilter.search = document.getElementById('conv-search')?.value || '';
+  convFilter.outcome = document.getElementById('conv-outcome')?.value || '';
+  convPage = 1;
+  await loadConversations();
+}
+
+async function loadConversations() {
+  const params = new URLSearchParams({ page: convPage, limit: 15 });
+  if (convFilter.outcome) params.append('outcome', convFilter.outcome);
+  if (convFilter.search) params.append('search', convFilter.search);
+  const data = await api('/api/conversations?' + params);
+  if (!data) return;
+  const tbody = document.getElementById('conv-rows');
+  if (!tbody) return;
+  if (!data.conversations.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="9">No conversations found.</td></tr>';
+    document.getElementById('conv-pagination').innerHTML = '';
+    return;
+  }
+  tbody.innerHTML = data.conversations.map(c => `
+    <tr>
+      <td style="color:var(--faint)">#${c.id}</td>
+      <td><strong>${c.borrower_name||'—'}</strong><div style="font-size:.68rem;color:var(--faint)">${c.account_number||''}</div></td>
+      <td><span class="badge badge-stt">${c.stt_type}</span> <span class="badge badge-tts">${c.tts_type}</span></td>
+      <td><span class="badge badge-${c.outcome||'incomplete'}">${fmtOutcome(c.outcome)}</span></td>
+      <td style="font-size:.75rem;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.payment_plan||'—'}</td>
+      <td>${fmtDuration(c.duration_seconds)}</td>
+      <td>$${(c.estimated_cost_usd||0).toFixed(4)}</td>
+      <td style="color:var(--muted)">${fmtDate(c.started_at)}</td>
+      <td><button class="btn-view" onclick="viewTranscript(${c.id})">Transcript</button></td>
+    </tr>`).join('');
+
+  const totalPages = Math.ceil(data.total / 15);
+  const pg = document.getElementById('conv-pagination');
+  pg.innerHTML = `<span>${data.total} conversations</span>
+    <div class="page-btns">
+      ${convPage > 1 ? `<button class="btn-page" onclick="changePage(${convPage-1})">← Prev</button>` : ''}
+      <button class="btn-page current">Page ${convPage}</button>
+      ${convPage < totalPages ? `<button class="btn-page" onclick="changePage(${convPage+1})">Next →</button>` : ''}
+    </div>`;
+}
+
+async function changePage(p) { convPage = p; await loadConversations(); }
+
+async function viewTranscript(id) {
+  const data = await api(`/api/conversations/${id}`);
+  if (!data) return;
+  document.getElementById('modal-title').textContent = `${data.borrower_name || 'Conversation'} #${id}`;
+  document.getElementById('modal-meta').innerHTML = `
+    <span>📋 ${fmtOutcome(data.outcome)}</span>
+    <span>⏱ ${fmtDuration(data.duration_seconds)}</span>
+    <span>💰 $${(data.estimated_cost_usd||0).toFixed(4)}</span>
+    <span>🔧 ${data.stt_type}+${data.tts_type}+${data.llm_type}</span>
+    ${data.payment_plan ? `<span>🤝 ${data.payment_plan}</span>` : ''}
+    ${data.payment_date ? `<span>📅 ${data.payment_date}</span>` : ''}`;
+  const body = document.getElementById('modal-body');
+  if (!data.transcript || !data.transcript.length) {
+    body.innerHTML = '<p style="color:var(--muted);text-align:center">No transcript available.</p>';
+  } else {
+    body.innerHTML = data.transcript.map(m => `
+      <div class="msg ${m.role}">
+        <div class="msg-role">${m.role === 'user' ? '👤 Borrower' : '🤖 Agent'}</div>
+        ${m.text}
+      </div>`).join('');
+  }
+  document.getElementById('transcript-modal').style.display = 'flex';
+}
+
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('transcript-modal'))
+    document.getElementById('transcript-modal').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Analytics
+// ═══════════════════════════════════════════════════════════════
+async function renderAnalytics(el) {
+  el.innerHTML = `<div class="analytics-grid" id="analytics-grid"><p style="color:var(--muted)">Loading…</p></div>`;
+  const stats = await api('/api/stats');
+  if (!stats) return;
+
+  const ob = stats.outcome_breakdown || {};
+  const pb = stats.pipeline_breakdown || {};
+  const dc = stats.daily_counts || [];
+  const maxDC = Math.max(1, ...dc.map(d=>d.count));
+  const totalOut = Object.values(ob).reduce((a,b)=>a+b,0) || 1;
+  const totalPip = Object.values(pb).reduce((a,b)=>a+b,0) || 1;
+
+  const outColors = { ptp:'green', callback:'amber', wrong_person:'red', incomplete:'blue', unknown:'accent' };
+
+  el.innerHTML = `
+    <div class="analytics-grid">
+      <div class="analytics-card">
+        <h4>Outcome Distribution</h4>
+        ${Object.entries(ob).map(([k,v])=>`
+          <div class="bar-row">
+            <span class="bar-label">${fmtOutcome(k)}</span>
+            <div class="bar-track"><div class="bar-fill ${outColors[k]||'accent'}" style="width:${Math.round(v/totalOut*100)}%"></div></div>
+            <span class="bar-count">${v}</span>
+          </div>`).join('') || '<p style="color:var(--faint);font-size:.75rem">No data yet</p>'}
+      </div>
+      <div class="analytics-card">
+        <h4>Pipeline Usage</h4>
+        ${Object.entries(pb).map(([k,v])=>`
+          <div class="bar-row">
+            <span class="bar-label">${k}</span>
+            <div class="bar-track"><div class="bar-fill accent" style="width:${Math.round(v/totalPip*100)}%"></div></div>
+            <span class="bar-count">${v}</span>
+          </div>`).join('') || '<p style="color:var(--faint);font-size:.75rem">No data yet</p>'}
+      </div>
+      <div class="analytics-card">
+        <h4>7-Day Volume</h4>
+        <div class="volume-chart">
+          ${dc.map(d=>`<div class="vol-col">
+            <div class="vol-bar" style="height:${Math.round(d.count/maxDC*72)}px"></div>
+            <span class="vol-label">${d.date.split(' ')[1]||d.date}</span>
+          </div>`).join('')}
+        </div>
+        <div style="margin-top:.75rem;font-size:.72rem;color:var(--muted)">Total this week: ${dc.reduce((a,d)=>a+d.count,0)} calls</div>
+      </div>
+      <div class="analytics-card">
+        <h4>Cost Summary</h4>
+        <table style="width:100%;font-size:.78rem;border-collapse:collapse">
+          <tr><td style="color:var(--muted);padding:.3rem 0">Total conversations</td><td style="text-align:right;font-weight:600">${stats.total}</td></tr>
+          <tr><td style="color:var(--muted);padding:.3rem 0">Avg. duration</td><td style="text-align:right;font-weight:600">${fmtDuration(stats.avg_duration_seconds)}</td></tr>
+          <tr><td style="color:var(--muted);padding:.3rem 0">Total estimated cost</td><td style="text-align:right;font-weight:600;color:var(--amber)">$${stats.total_cost_usd.toFixed(4)}</td></tr>
+          <tr><td style="color:var(--muted);padding:.3rem 0">Avg. cost / call</td><td style="text-align:right;font-weight:600">$${stats.total?(stats.total_cost_usd/stats.total).toFixed(4):'0.0000'}</td></tr>
+          <tr><td style="color:var(--muted);padding:.3rem 0">Active now</td><td style="text-align:right;font-weight:600;color:${stats.active_now?'var(--green)':'var(--faint)'}">${stats.active_now}</td></tr>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Settings
+// ═══════════════════════════════════════════════════════════════
+async function renderSettings(el) {
+  const cs = await api('/api/config-status') || {};
+  const keys = [
+    { key:'deepgram',   label:'Deepgram API Key',   env:'DEEPGRAM_API_KEY',   ok: cs.deepgram },
+    { key:'openai',     label:'OpenAI API Key',      env:'OPENAI_API_KEY',     ok: cs.openai },
+    { key:'sarvam',     label:'Sarvam AI Key',       env:'SARVAM_API_KEY',     ok: cs.sarvam },
+    { key:'ollama',     label:'Groq / Ollama Key',   env:'GROQ_API_KEY / OLLAMA_BASE_URL', ok: cs.ollama_or_groq },
+  ];
+  el.innerHTML = `
+    <div class="settings-section">
+      <h3>API Key Status</h3>
+      <div class="api-key-grid">
+        ${keys.map(k=>`<div class="api-key-item">
+          <div>
+            <div class="api-key-name">${k.label}</div>
+            <div style="font-size:.65rem;color:var(--faint)">${k.env}</div>
+          </div>
+          <div class="api-key-status">
+            ${k.ok ? '<span class="dot-ok">✓ Configured</span>' : '<span class="dot-miss">✗ Missing</span>'}
+          </div>
+        </div>`).join('')}
+      </div>
+      <p style="margin-top:.75rem;font-size:.72rem;color:var(--faint)">API keys are set as environment variables on your deployment server. Restart required after changes.</p>
     </div>
 
-    <!-- Client: full-screen prebuilt UI with flow tracking -->
-    <div id="client-view">
-        <div class="client-bar">
-            <div class="client-bar-info">
-                <span class="pipeline-label" id="active-label"></span>
-                <span class="badge badge-stt" id="active-stt"></span>
-                <span class="badge badge-tts" id="active-tts"></span>
-                <span class="badge badge-llm" id="active-llm"></span>
-            </div>
-            <button class="btn-back" onclick="backToDashboard()">Back to Dashboard</button>
+    <div class="settings-section">
+      <h3>Default Agent Profile</h3>
+      <div class="settings-form">
+        <div class="settings-field"><label>Agent Name</label><input id="s-agent" value="Priya"></div>
+        <div class="settings-field"><label>Company Name</label><input id="s-company" value="QuickFinance Ltd."></div>
+        <div class="settings-field"><label>Default Language</label>
+          <select id="s-lang"><option value="hinglish">Hinglish</option><option value="hindi">Hindi</option><option value="english">English</option></select>
         </div>
-
-        <!-- Flow Steps Visualization -->
-        <div class="flow-bar" id="flow-bar"></div>
-
-        <!-- Prebuilt client (full width, conversation + metrics tabs built in) -->
-        <iframe id="client-iframe" src="about:blank" allow="microphone"></iframe>
+        <div class="settings-field"><label>OpenAI TTS Voice</label>
+          <select id="s-voice"><option value="shimmer">shimmer</option><option value="alloy">alloy</option><option value="nova">nova</option><option value="echo">echo</option><option value="fable">fable</option><option value="onyx">onyx</option></select>
+        </div>
+      </div>
+      <p style="margin-top:.75rem;font-size:.72rem;color:var(--faint)">These defaults pre-populate the Voice Agent configuration panel.</p>
+      <button class="btn-save" onclick="alert('Saved locally. Deploy with updated env vars to persist.')">Save Defaults</button>
     </div>
 
-    <script>
-    const PIPELINES = [
-        {
-            stt: 'deepgram', tts: 'openai', llm: 'openai',
-            label: 'Deepgram + OpenAI TTS',
-            desc: 'Streaming STT via Deepgram Nova-3 with OpenAI TTS voice synthesis. Best overall quality.',
-            requires: ['deepgram', 'openai'],
-        },
-        {
-            stt: 'deepgram', tts: 'edge', llm: 'openai',
-            label: 'Deepgram + Edge TTS',
-            desc: 'Streaming STT via Deepgram Nova-3 with free Microsoft Edge TTS (excellent Hindi pronunciation).',
-            requires: ['deepgram', 'openai'],
-        },
-        {
-            stt: 'whisper', tts: 'openai', llm: 'openai',
-            label: 'Whisper + OpenAI TTS',
-            desc: 'OpenAI Whisper (gpt-4o-transcribe) for STT with OpenAI TTS voice synthesis.',
-            requires: ['openai'],
-        },
-        {
-            stt: 'whisper', tts: 'edge', llm: 'openai',
-            label: 'Whisper + Edge TTS',
-            desc: 'OpenAI Whisper for STT with free Microsoft Edge TTS. Fully Hindi-optimized.',
-            requires: ['openai'],
-        },
-        {
-            stt: 'sarvam', tts: 'sarvam', llm: 'ollama',
-            label: 'Sarvam AI + Ollama',
-            desc: 'Indian-made Sarvam AI for STT (saarika) and TTS (bulbul) with Ollama LLM. Optimized for Indian languages.',
-            requires: ['sarvam'],
-            featured: true,
-        },
-    ];
+    <div class="settings-section">
+      <h3>Account</h3>
+      <div class="settings-form">
+        <div class="settings-field"><label>Username</label><input value="${currentUser.username||''}" disabled></div>
+        <div class="settings-field"><label>Role</label><input value="${currentUser.role||'user'}" disabled></div>
+        <div class="settings-field"><label>New Password</label><input type="password" id="s-newpass" placeholder="Leave blank to keep current"></div>
+        <div class="settings-field"><label>Confirm Password</label><input type="password" id="s-confpass" placeholder="Repeat new password"></div>
+      </div>
+      <button class="btn-save" onclick="alert('Password change via ADMIN_PASSWORD env var on Render.')">Update Password</button>
+    </div>`;
+}
 
-    // Flow node definitions (synced with bot.py FLOW_NODES)
-    const FLOW_NODES = [
-        { id: 'greeting', label: 'Greeting' },
-        { id: 'overdue_info', label: 'Overdue Info' },
-        { id: 'understand_situation', label: 'Situation' },
-        { id: 'payment_options', label: 'Options' },
-        { id: 'commitment', label: 'Commitment' },
-        { id: 'promise_to_pay', label: 'PTP' },
-        { id: 'end', label: 'Complete' },
-    ];
+// ═══════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════
+function fmtDuration(s) {
+  if (!s && s !== 0) return '—';
+  const m = Math.floor(s / 60), sec = Math.round(s % 60);
+  return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
 
-    let pollInterval = null;
-    let configStatus = {};
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+}
 
-    // ---- Fetch config status on load ----
-    async function fetchConfigStatus() {
-        try {
-            const res = await fetch('/api/config-status');
-            if (res.ok) configStatus = await res.json();
-        } catch (e) {
-            // Use defaults
-        }
-        buildCards();
-    }
-
-    // ---- Config panel toggle ----
-    function toggleConfig() {
-        const btn = document.getElementById('config-toggle');
-        const body = document.getElementById('config-body');
-        btn.classList.toggle('open');
-        body.classList.toggle('open');
-    }
-
-    function getAgentConfig() {
-        return {
-            agent_name: document.getElementById('cfg-agent-name').value,
-            company_name: document.getElementById('cfg-company').value,
-            language: document.getElementById('cfg-language').value,
-            borrower_name: document.getElementById('cfg-borrower').value,
-            emi_amount: document.getElementById('cfg-emi').value,
-            total_due: document.getElementById('cfg-total').value,
-            overdue_months: document.getElementById('cfg-overdue').value,
-            account_number: document.getElementById('cfg-account').value,
-        };
-    }
-
-    // ---- Build pipeline cards ----
-    function buildCards() {
-        const grid = document.getElementById('grid');
-        grid.innerHTML = '';
-
-        PIPELINES.forEach(p => {
-            const card = document.createElement('div');
-            card.className = 'card' + (p.featured ? ' card-featured' : '');
-
-            // Check if required services are configured
-            const missingKeys = (p.requires || []).filter(k => !configStatus[k]);
-            const hasWarning = missingKeys.length > 0;
-
-            let badgesHtml = `
-                <span class="badge badge-stt">STT: ${p.stt}</span>
-                <span class="badge badge-tts">TTS: ${p.tts}</span>
-            `;
-            if (p.llm !== 'openai') {
-                badgesHtml += `<span class="badge badge-llm">LLM: ${p.llm}</span>`;
-            }
-
-            let warnHtml = '';
-            if (hasWarning) {
-                const names = missingKeys.map(k => k.toUpperCase() + '_API_KEY').join(', ');
-                warnHtml = `<div class="card-warn">Requires env var: ${names}</div>`;
-            }
-
-            card.innerHTML = `
-                <h2>${p.label}</h2>
-                <div class="badges">${badgesHtml}</div>
-                <div class="card-desc">${p.desc}</div>
-                ${warnHtml}
-                <button class="btn btn-connect" ${hasWarning ? 'disabled' : ''}>Connect</button>
-            `;
-            grid.appendChild(card);
-
-            if (!hasWarning) {
-                card.querySelector('.btn-connect').addEventListener('click', () => {
-                    openPipeline(p);
-                });
-            }
-        });
-    }
-
-    // ---- Build flow steps bar ----
-    function buildFlowBar() {
-        const bar = document.getElementById('flow-bar');
-        bar.innerHTML = '';
-        FLOW_NODES.forEach((node, i) => {
-            const step = document.createElement('div');
-            step.className = 'flow-step';
-
-            const dot = document.createElement('div');
-            dot.className = 'flow-dot';
-            dot.id = `flow-dot-${node.id}`;
-            dot.textContent = i + 1;
-
-            const label = document.createElement('span');
-            label.className = 'flow-label';
-            label.id = `flow-label-${node.id}`;
-            label.textContent = node.label;
-
-            step.appendChild(dot);
-            step.appendChild(label);
-            bar.appendChild(step);
-
-            if (i < FLOW_NODES.length - 1) {
-                const connector = document.createElement('div');
-                connector.className = 'flow-connector';
-                connector.id = `flow-conn-${i}`;
-                bar.appendChild(connector);
-            }
-        });
-    }
-
-    function updateFlowState(currentNode) {
-        if (!currentNode) return;
-
-        const currentIdx = FLOW_NODES.findIndex(n => n.id === currentNode);
-        if (currentIdx === -1) return;
-
-        FLOW_NODES.forEach((node, i) => {
-            const dot = document.getElementById(`flow-dot-${node.id}`);
-            const label = document.getElementById(`flow-label-${node.id}`);
-            if (!dot || !label) return;
-
-            dot.classList.remove('active', 'done');
-            label.classList.remove('active', 'done');
-
-            if (i < currentIdx) {
-                dot.classList.add('done');
-                label.classList.add('done');
-            } else if (i === currentIdx) {
-                dot.classList.add('active');
-                label.classList.add('active');
-            }
-
-            if (i < FLOW_NODES.length - 1) {
-                const conn = document.getElementById(`flow-conn-${i}`);
-                if (conn) {
-                    conn.classList.toggle('done', i < currentIdx);
-                }
-            }
-        });
-    }
-
-    // ---- Poll for flow state ----
-    async function pollFlowState() {
-        try {
-            const res = await fetch('/api/active-flow');
-            if (!res.ok) return;
-            const data = await res.json();
-            updateFlowState(data.current_node);
-        } catch (e) {
-            // Silently ignore polling errors
-        }
-    }
-
-    // ---- Pipeline selection & client view ----
-    async function openPipeline(p) {
-        const config = getAgentConfig();
-
-        try {
-            const res = await fetch('/set-pipeline', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    stt: p.stt,
-                    tts: p.tts,
-                    llm: p.llm,
-                    config: config,
-                }),
-            });
-            if (!res.ok) throw new Error(`set-pipeline returned ${res.status}`);
-        } catch (e) {
-            alert('Failed to set pipeline: ' + e.message);
-            return;
-        }
-
-        // Update the top bar
-        document.getElementById('active-label').textContent = p.label;
-        document.getElementById('active-stt').textContent = 'STT: ' + p.stt;
-        document.getElementById('active-tts').textContent = 'TTS: ' + p.tts;
-        const llmBadge = document.getElementById('active-llm');
-        if (p.llm !== 'openai') {
-            llmBadge.textContent = 'LLM: ' + p.llm;
-            llmBadge.style.display = '';
-        } else {
-            llmBadge.style.display = 'none';
-        }
-
-        // Build flow steps
-        buildFlowBar();
-
-        // Switch views
-        document.getElementById('dashboard-view').style.display = 'none';
-        document.getElementById('client-view').style.display = 'flex';
-
-        // Load the prebuilt client (it calls /start which picks up our pipeline)
-        document.getElementById('client-iframe').src = '/client/';
-
-        // Start polling for flow state
-        if (pollInterval) clearInterval(pollInterval);
-        pollInterval = setInterval(pollFlowState, 1000);
-    }
-
-    function backToDashboard() {
-        // Stop polling
-        if (pollInterval) {
-            clearInterval(pollInterval);
-            pollInterval = null;
-        }
-
-        // Tear down the iframe (disconnects WebRTC)
-        const iframe = document.getElementById('client-iframe');
-        iframe.src = 'about:blank';
-
-        // Switch views
-        document.getElementById('client-view').style.display = 'none';
-        document.getElementById('dashboard-view').style.display = 'block';
-    }
-
-    // Initialize
-    fetchConfigStatus();
-    </script>
+function fmtOutcome(o) {
+  return { ptp:'PTP', callback:'Callback', wrong_person:'Wrong Person', incomplete:'Incomplete' }[o] || o || 'Unknown';
+}
+</script>
 </body>
 </html>

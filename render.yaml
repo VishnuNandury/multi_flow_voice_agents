@@ -5,10 +5,43 @@ services:
     plan: starter
     healthCheckPath: /health
     envVars:
+      # --- Required ---
       - key: DEEPGRAM_API_KEY
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+
+      # --- Auth (v2) ---
+      - key: SECRET_KEY
+        sync: false
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: TOKEN_EXPIRE_HOURS
+        value: "24"
+
+      # --- Database (v2) ---
+      # Defaults to SQLite at ./data/agent.db — no change needed for SQLite
+      # Set DATABASE_URL to a Postgres URL if you want persistent storage on Render
+      # - key: DATABASE_URL
+      #   sync: false
+
+      # --- Sarvam AI (v2 — 5th pipeline) ---
+      - key: SARVAM_API_KEY
+        sync: false
+
+      # --- Groq / Ollama (v2 — 5th pipeline LLM fallback) ---
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+      # - key: OLLAMA_BASE_URL
+      #   sync: false
+      # - key: OLLAMA_MODEL
+      #   value: llama3.1
+
+      # --- TURN Server ---
       - key: TURN_URL
         sync: false
       - key: TURN_USERNAME

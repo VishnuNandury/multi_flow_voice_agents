@@ -9,6 +9,7 @@
 # Agent persona and borrower details are configurable from the dashboard.
 #
 
+import asyncio
 import os
 import sys
 import time
@@ -50,6 +51,22 @@ from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
 from edge_tts_service import EdgeTTSService
 from pipecat_flows import FlowArgs, FlowManager, FlowsFunctionSchema, NodeConfig
+
+# Optional DB save — gracefully skipped if database module not available
+try:
+    from database import save_conversation_sync as _db_save
+    _DB_AVAILABLE = True
+except Exception:
+    _DB_AVAILABLE = False
+
+
+async def _save_conversation_to_db(pc_id: str, data: dict):
+    """Fire-and-forget DB save run in a thread pool."""
+    if _DB_AVAILABLE:
+        try:
+            await asyncio.to_thread(_db_save, pc_id, data)
+        except Exception as e:
+            logger.warning(f"DB save failed for {pc_id}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +242,9 @@ def create_greeting_node(cfg: dict) -> NodeConfig:
 
     async def wrong_person(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         _track_node(flow_manager, "end")
+        _pc = flow_manager.state.get("pc_id", "")
+        if _pc in session_data:
+            session_data[_pc]["outcome"] = "wrong_person"
         return "Wrong person on the line", create_wrong_person_end_node(cfg)
 
     return NodeConfig(
@@ -364,6 +384,9 @@ def create_payment_options_node(cfg: dict) -> NodeConfig:
     async def request_callback(args: FlowArgs, flow_manager: FlowManager) -> tuple:
         flow_manager.state["plan"] = "Callback requested"
         _track_node(flow_manager, "end")
+        _pc = flow_manager.state.get("pc_id", "")
+        if _pc in session_data:
+            session_data[_pc]["outcome"] = "callback"
         return "Senior representative callback requested", create_callback_end_node(cfg)
 
     return NodeConfig(
@@ -468,6 +491,11 @@ def create_promise_to_pay_node(cfg: dict) -> NodeConfig:
         date = flow_manager.state.get("payment_date", "")
         logger.info(f"PTP confirmed: {plan} by {date}")
         _track_node(flow_manager, "end")
+        _pc = flow_manager.state.get("pc_id", "")
+        if _pc in session_data:
+            session_data[_pc]["outcome"] = "ptp"
+            session_data[_pc]["payment_plan"] = plan
+            session_data[_pc]["payment_date"] = date
         return f"PTP confirmed: {plan} by {date}", create_end_node(cfg)
 
     async def revise_plan(args: FlowArgs, flow_manager: FlowManager) -> tuple:
@@ -608,12 +636,19 @@ def create_stt(stt_type: str):
 def create_tts(tts_type: str):
     """Create TTS service based on type."""
     if tts_type == "sarvam":
-        logger.info("TTS: Sarvam bulbul:v2 (anushka)")
+        sarvam_model = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
+        sarvam_voice = os.getenv("SARVAM_TTS_VOICE", "Priya")
+        logger.info(f"TTS: Sarvam {sarvam_model} ({sarvam_voice})")
         return SarvamTTSService(
             api_key=os.getenv("SARVAM_API_KEY", ""),
-            model="bulbul:v2",
-            voice_id=os.getenv("SARVAM_TTS_VOICE", "anushka"),
-            params=SarvamTTSService.InputParams(language=Language.HI),
+            model=sarvam_model,
+            voice_id=sarvam_voice,
+            params=SarvamTTSService.InputParams(
+                language=Language.HI,
+                # bulbul:v3 uses temperature (0.01-1.0); bulbul:v2 uses pitch/pace/loudness
+                # The same InputParams class handles both — unused params are ignored per model
+                temperature=0.65,   # slightly focused, natural delivery
+            ),
         )
     elif tts_type == "edge":
         logger.info("TTS: Edge TTS (hi-IN-SwaraNeural)")
@@ -742,7 +777,7 @@ async def run_bot(
         transport=transport,
     )
 
-    # --- Session tracking for the dashboard API ---
+    # --- Session tracking for the dashboard API + DB save ---
     session_data[pc_id] = {
         "current_node": "greeting",
         "start_time": time.time(),
@@ -750,6 +785,10 @@ async def run_bot(
         "tts_type": tts_type,
         "llm_type": llm_type,
         "transcript": [],
+        "outcome": None,
+        "payment_plan": None,
+        "payment_date": None,
+        "agent_config": cfg,
     }
 
     # --- Event handlers ---
@@ -762,7 +801,13 @@ async def run_bot(
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected ({stt_type}+{tts_type}+{llm_type})")
-        session_data.pop(pc_id, None)
+        data = dict(session_data.pop(pc_id, {}))
+        if data:
+            # Mark incomplete if no explicit outcome was set
+            if not data.get("outcome"):
+                data["outcome"] = "incomplete"
+            data["end_time"] = time.time()
+            asyncio.create_task(_save_conversation_to_db(pc_id, data))
         await task.queue_frames([EndFrame()])
 
     # --- Run ---
