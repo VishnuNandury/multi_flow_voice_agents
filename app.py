@@ -6,6 +6,7 @@
 # Serves a custom dashboard at / with 5 pipeline comparison panels.
 #
 
+import asyncio
 import json
 import os
 import sys
