@@ -10,8 +10,12 @@ import os
 from datetime import datetime, timezone
 
 from loguru import logger
+import csv
+import io
+import re
+
 from sqlalchemy import (
-    Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine,
+    Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
@@ -20,6 +24,11 @@ from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 # ---------------------------------------------------------------------------
 
 _DB_URL = os.getenv("DATABASE_URL", "sqlite:///./data/agent.db")
+
+# Neon (and some other Postgres hosts) give a URL starting with "postgres://"
+# SQLAlchemy 2.x requires "postgresql://"
+if _DB_URL.startswith("postgres://"):
+    _DB_URL = _DB_URL.replace("postgres://", "postgresql://", 1)
 
 _connect_args = {"check_same_thread": False} if _DB_URL.startswith("sqlite") else {}
 engine = create_engine(_DB_URL, connect_args=_connect_args)
@@ -83,6 +92,70 @@ class Conversation(Base):
     estimated_cost_usd = Column(Float, default=0.0)
 
     user = relationship("User", back_populates="conversations")
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    phone = Column(String(20), nullable=False)
+    account_number = Column(String(50), nullable=True)
+    loan_type = Column(String(50), nullable=True, default="Personal Loan")
+    emi_amount = Column(String(20), nullable=True)
+    total_due = Column(String(20), nullable=True)
+    overdue_months = Column(String(10), nullable=True)
+    overdue_period = Column(String(100), nullable=True)
+    late_fee = Column(String(20), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    campaign_calls = relationship("CampaignCall", back_populates="customer")
+
+
+class Campaign(Base):
+    __tablename__ = "campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(20), default="draft")  # draft/running/paused/completed
+    provider = Column(String(20), nullable=False)  # twilio/exotel
+    pipeline_stt = Column(String(20), default="deepgram")
+    pipeline_tts = Column(String(20), default="openai")
+    pipeline_llm = Column(String(20), default="openai")
+    total_customers = Column(Integer, default=0)
+    calls_attempted = Column(Integer, default=0)
+    calls_connected = Column(Integer, default=0)
+    calls_completed = Column(Integer, default=0)
+    ptp_count = Column(Integer, default=0)
+    payment_confirmed_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    calls = relationship("CampaignCall", back_populates="campaign")
+
+
+class CampaignCall(Base):
+    __tablename__ = "campaign_calls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=False)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    provider_call_sid = Column(String(100), nullable=True)
+    call_status = Column(String(20), default="pending")  # pending/dialing/in_progress/completed/failed/no_answer/busy
+    outcome = Column(String(30), nullable=True)
+    payment_made = Column(Boolean, default=False)
+    payment_amount = Column(Float, nullable=True)
+    has_receipt = Column(Boolean, nullable=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
+
+    campaign = relationship("Campaign", back_populates="calls")
+    customer = relationship("Customer", back_populates="campaign_calls")
 
 
 # ---------------------------------------------------------------------------
@@ -236,3 +309,79 @@ def save_conversation_sync(pc_id: str, data: dict):
             db.close()
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Phone normalization + CSV import
+# ---------------------------------------------------------------------------
+
+def normalize_phone(phone: str) -> str:
+    """Strip non-digits and prepend +91 for 10-digit Indian numbers."""
+    digits = re.sub(r"\D", "", phone)
+    if len(digits) == 10:
+        return f"+91{digits}"
+    if len(digits) == 12 and digits.startswith("91"):
+        return f"+{digits}"
+    if len(digits) == 13 and digits.startswith("091"):
+        return f"+91{digits[3:]}"
+    # Already in E.164-ish form
+    if phone.startswith("+"):
+        return f"+{digits}"
+    return digits
+
+
+_CSV_FIELD_ALIASES = {
+    "name": ["name", "borrower_name", "borrower", "customer_name"],
+    "phone": ["phone", "mobile", "phone_number", "mobile_number", "contact"],
+    "account_number": ["account_number", "account", "acc_no", "account_no"],
+    "loan_type": ["loan_type", "loan", "type"],
+    "emi_amount": ["emi_amount", "emi", "monthly_emi"],
+    "total_due": ["total_due", "total", "due_amount", "outstanding"],
+    "overdue_months": ["overdue_months", "overdue", "months_overdue"],
+    "overdue_period": ["overdue_period", "period"],
+    "late_fee": ["late_fee", "fee", "penalty"],
+    "notes": ["notes", "note", "remarks", "comment"],
+}
+
+
+def _map_csv_header(header: str) -> str | None:
+    """Map a CSV column header to our internal field name."""
+    h = header.strip().lower().replace(" ", "_").replace("-", "_")
+    for field, aliases in _CSV_FIELD_ALIASES.items():
+        if h in aliases:
+            return field
+    return None
+
+
+def parse_customer_csv(text: str) -> list[dict]:
+    """
+    Parse CSV text into a list of customer dicts.
+    Returns list of dicts with keys matching Customer model fields.
+    Raises ValueError if 'name' or 'phone' columns are missing.
+    """
+    reader = csv.DictReader(io.StringIO(text.strip()))
+    headers = reader.fieldnames or []
+    col_map = {}
+    for h in headers:
+        mapped = _map_csv_header(h)
+        if mapped:
+            col_map[h] = mapped
+
+    if not any(v == "name" for v in col_map.values()):
+        raise ValueError("CSV must have a 'name' column")
+    if not any(v == "phone" for v in col_map.values()):
+        raise ValueError("CSV must have a 'phone' column")
+
+    customers = []
+    for row in reader:
+        record: dict = {}
+        for csv_col, field in col_map.items():
+            val = (row.get(csv_col) or "").strip()
+            if val:
+                record[field] = val
+        if not record.get("name") or not record.get("phone"):
+            continue  # skip rows with missing required fields
+        record["phone"] = normalize_phone(record["phone"])
+        customers.append(record)
+
+    return customers

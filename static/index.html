@@ -219,6 +219,16 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Ro
 .btn-save{margin-top:1rem;padding:.5rem 1.25rem;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s}
 .btn-save:hover{background:var(--accent-h)}
 
+/* ── Shared utility classes ──────────────────── */
+.input{padding:.45rem .7rem;border-radius:8px;border:1px solid var(--border);background:#0b0f1a;color:var(--text);font-size:.82rem;outline:none;transition:border-color .15s}
+.input:focus{border-color:var(--accent)}
+select.input{cursor:pointer}
+.btn{padding:.45rem 1rem;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:.82rem;font-weight:600;cursor:pointer;transition:background .15s}
+.btn:hover{background:var(--accent-h)}
+.btn-ghost{padding:.45rem 1rem;border-radius:8px;border:1px solid var(--faint);background:none;color:var(--muted);font-size:.82rem;font-weight:500;cursor:pointer;transition:all .15s}
+.btn-ghost:hover{background:var(--border);color:var(--text)}
+.field-label{display:block;font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:500;margin-bottom:.25rem}
+
 /* ── Active call banner ──────────────────────── */
 .active-banner{display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);border-radius:10px;margin-bottom:1rem;font-size:.8rem}
 .active-banner strong{color:var(--green)}
@@ -278,6 +288,14 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Ro
         <button class="nav-item" data-page="conversations" onclick="navigate('conversations')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           Conversations
+        </button>
+        <button class="nav-item" data-page="customers" onclick="navigate('customers')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Customers
+        </button>
+        <button class="nav-item" data-page="campaigns" onclick="navigate('campaigns')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 7 13 17 8 12 1 19"/><polyline points="17 7 23 7 23 13"/></svg>
+          Campaigns
         </button>
         <button class="nav-item" data-page="analytics" onclick="navigate('analytics')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -340,6 +358,7 @@ const PIPELINES = [
   { stt:'whisper',  tts:'openai',  llm:'openai',  label:'Whisper + OpenAI TTS',    desc:'OpenAI Whisper (gpt-4o-transcribe) STT with OpenAI voice synthesis.', requires:['openai'] },
   { stt:'whisper',  tts:'edge',    llm:'openai',  label:'Whisper + Edge TTS',      desc:'OpenAI Whisper STT with free Microsoft Edge TTS.', requires:['openai'] },
   { stt:'sarvam',   tts:'sarvam',  llm:'ollama',  label:'Sarvam AI + Ollama/Groq', desc:'Indian-made Sarvam AI (saarika STT + bulbul TTS) with Ollama or Groq LLM. Best for Indian languages.', requires:['sarvam'], featured:true },
+  { type:'inya', label:'inya.ai Agent', desc:'Full-stack Indian voice AI managed by inya.ai (by Gnani.ai). inya handles STT, TTS and LLM. Calls are initiated via inya and outcomes sync back here.', requires:['inya'], featured:true },
 ];
 
 const FLOW_NODES = [
@@ -446,10 +465,10 @@ async function showApp() {
 // ═══════════════════════════════════════════════════════════════
 // Router
 // ═══════════════════════════════════════════════════════════════
-const PAGE_TITLES = { dashboard:'Dashboard', agent:'Voice Agent', conversations:'Conversations', analytics:'Analytics', settings:'Settings' };
+const PAGE_TITLES = { dashboard:'Dashboard', agent:'Voice Agent', conversations:'Conversations', customers:'Customers', campaigns:'Campaigns', analytics:'Analytics', settings:'Settings' };
 
 function navigate(page) {
-  if (!['dashboard','agent','conversations','analytics','settings'].includes(page)) page = 'dashboard';
+  if (!['dashboard','agent','conversations','customers','campaigns','analytics','settings'].includes(page)) page = 'dashboard';
   currentPage = page;
   location.hash = page;
   document.getElementById('page-title').textContent = PAGE_TITLES[page];
@@ -457,6 +476,7 @@ function navigate(page) {
     el.classList.toggle('active', el.dataset.page === page);
   });
   // If leaving agent page while in a call, clean up
+  if (page !== 'campaigns' && _campaignPollTimer) { clearInterval(_campaignPollTimer); _campaignPollTimer = null; }
   if (page !== 'agent' && activeCall) {
     document.getElementById('client-iframe')?.remove();
     activeCall = false;
@@ -466,6 +486,8 @@ function navigate(page) {
     dashboard: renderDashboard,
     agent: renderAgent,
     conversations: renderConversations,
+    customers: renderCustomers,
+    campaigns: renderCampaigns,
     analytics: renderAnalytics,
     settings: renderSettings,
   }[page])(content);
@@ -573,6 +595,7 @@ function buildPipelineCards() {
   const grid = document.getElementById('pipeline-grid');
   if (!grid) return;
   grid.innerHTML = PIPELINES.map((p, i) => {
+    if (p.type === 'inya') return buildInyaCard(p);
     const missing = (p.requires||[]).filter(k => !configStatus[k]);
     const warn = missing.length > 0;
     const warnHtml = warn ? `<div class="pipeline-warn">⚠ Requires: ${missing.map(k=>k.toUpperCase()+'_API_KEY').join(', ')}</div>` : '';
@@ -585,6 +608,62 @@ function buildPipelineCards() {
       <button class="btn-connect" ${warn?'disabled':''} onclick="selectPipeline(${i})">${warn?'Unavailable':'Connect'}</button>
     </div>`;
   }).join('');
+}
+
+function buildInyaCard(p) {
+  const configured = configStatus['inya'];
+  const baseUrl = window.location.origin;
+  const statusDot = configured
+    ? `<span style="color:var(--green);font-size:.72rem">● Webhook configured</span>`
+    : `<span style="color:var(--amber);font-size:.72rem">● Set INYA_WEBHOOK_SECRET to enable auth</span>`;
+
+  const endpointRow = (method, path, note) => `
+    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+      <span style="font-size:.62rem;font-weight:700;padding:.15rem .4rem;border-radius:4px;background:rgba(99,102,241,.15);color:var(--accent);width:36px;text-align:center;flex-shrink:0">${method}</span>
+      <code style="flex:1;font-size:.68rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${baseUrl}${path}</code>
+      <button onclick="copyText('${baseUrl}${path}')" style="background:none;border:1px solid var(--faint);color:var(--muted);border-radius:4px;padding:.1rem .4rem;font-size:.62rem;cursor:pointer;flex-shrink:0">Copy</button>
+    </div>
+    <div style="font-size:.65rem;color:var(--faint);margin-bottom:.6rem;padding-left:44px">${note}</div>`;
+
+  return `<div class="pipeline-card featured" style="border-color:rgba(16,185,129,.25);background:linear-gradient(135deg,#1a2133 0%,#0f2028 100%);grid-column:1/-1">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.5rem">
+      <h3 style="margin:0">${p.label}</h3>
+      ${statusDot}
+    </div>
+    <div class="pipeline-badges">
+      <span class="badge badge-stt">STT: Vachana</span>
+      <span class="badge badge-tts">TTS: inya</span>
+      <span class="badge badge-llm">LLM: inya</span>
+      <span style="font-size:.62rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(16,185,129,.1);color:#34d399;font-weight:600">External Agent</span>
+    </div>
+    <div class="pipeline-desc">${p.desc}</div>
+
+    <div style="background:#0b0f1a;border:1px solid var(--border);border-radius:8px;padding:.85rem;margin-bottom:.75rem">
+      <div style="font-size:.68rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.6rem">Add these in inya Dashboard → Custom Integration</div>
+      ${endpointRow('GET', '/api/inya/borrower', 'On-Call · fetch borrower info. Params: account_number, phone')}
+      ${endpointRow('POST', '/api/inya/outcome', 'Post-Call · report outcome. Body: outcome, borrower_name, payment_plan, duration_seconds')}
+      <div style="font-size:.65rem;color:var(--faint);margin-top:.4rem">
+        Auth header: <code style="color:var(--muted)">Authorization: Bearer &lt;INYA_WEBHOOK_SECRET&gt;</code>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:.6rem">
+      <a href="https://app.inya.ai" target="_blank" style="flex:1;text-align:center;padding:.5rem;border-radius:8px;border:1px solid var(--faint);color:var(--muted);font-size:.78rem;font-weight:600;text-decoration:none;transition:all .15s"
+         onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'"
+         onmouseout="this.style.borderColor='var(--faint)';this.style.color='var(--muted)'">
+        Open inya Dashboard ↗
+      </a>
+      <button onclick="navigate('conversations')" style="flex:1;padding:.5rem;border-radius:8px;border:none;background:rgba(16,185,129,.12);color:#34d399;font-size:.78rem;font-weight:600;cursor:pointer">
+        View inya Calls →
+      </button>
+    </div>
+  </div>`;
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    // brief visual feedback handled by the browser
+  });
 }
 
 async function selectPipeline(idx) {
@@ -899,6 +978,312 @@ async function renderSettings(el) {
       </div>
       <button class="btn-save" onclick="alert('Password change via ADMIN_PASSWORD env var on Render.')">Update Password</button>
     </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Customers Page
+// ═══════════════════════════════════════════════════════════════
+let _custPage = 1, _custSearch = '';
+
+async function renderCustomers(el) {
+  el.innerHTML = `
+    <div style="display:flex;gap:1rem;align-items:flex-start;flex-wrap:wrap;margin-bottom:1.5rem">
+      <div style="flex:1;min-width:280px">
+        <div id="csv-drop-zone" style="border:2px dashed var(--border);border-radius:12px;padding:1.5rem;text-align:center;cursor:pointer;transition:border-color .2s" ondragover="event.preventDefault();this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor='var(--border)'" ondrop="handleCsvDrop(event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5" style="width:32px;height:32px;margin:0 auto .5rem;display:block"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <div style="font-weight:600;margin-bottom:.25rem">Drop CSV here or <span style="color:var(--accent);cursor:pointer" onclick="document.getElementById('csv-file-input').click()">browse</span></div>
+          <div style="font-size:.75rem;color:var(--muted)">Columns: name, phone, account_number, emi_amount, total_due, overdue_months</div>
+          <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="uploadCsv(this.files[0])">
+        </div>
+        <div id="csv-result" style="margin-top:.5rem;font-size:.8rem"></div>
+      </div>
+      <div style="flex:1;min-width:280px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem">
+        <div style="font-weight:600;margin-bottom:.75rem">Add Customer</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+          <div><label style="font-size:.72rem;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:.2rem">Name *</label><input id="add-name" class="input" placeholder="Rajesh Kumar" style="width:100%"></div>
+          <div><label style="font-size:.72rem;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:.2rem">Phone *</label><input id="add-phone" class="input" placeholder="9876543210" style="width:100%"></div>
+          <div><label style="font-size:.72rem;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:.2rem">Account No</label><input id="add-acc" class="input" placeholder="QF-2024-001" style="width:100%"></div>
+          <div><label style="font-size:.72rem;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:.2rem">EMI Amount</label><input id="add-emi" class="input" placeholder="5280" style="width:100%"></div>
+          <div><label style="font-size:.72rem;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:.2rem">Total Due</label><input id="add-due" class="input" placeholder="11760" style="width:100%"></div>
+          <div><label style="font-size:.72rem;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:.2rem">Overdue Months</label><input id="add-months" class="input" placeholder="2" style="width:100%"></div>
+        </div>
+        <button class="btn" style="margin-top:.75rem;width:100%" onclick="addCustomer()">Add Customer</button>
+        <div id="add-cust-msg" style="margin-top:.4rem;font-size:.8rem"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:.5rem;margin-bottom:.75rem;align-items:center">
+      <input id="cust-search" class="input" placeholder="Search by name or phone…" style="flex:1;max-width:320px" oninput="_custSearch=this.value;_custPage=1;loadCustomers()">
+      <span id="cust-count" style="color:var(--muted);font-size:.8rem"></span>
+    </div>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Name</th><th>Phone</th><th>Account</th><th>EMI</th><th>Total Due</th><th>Overdue Months</th><th>Added</th><th></th></tr></thead>
+      <tbody id="cust-tbody"><tr class="empty-row"><td colspan="8">Loading…</td></tr></tbody>
+    </table></div>
+    <div id="cust-pager" style="display:flex;gap:.4rem;margin-top:.75rem;justify-content:center"></div>
+  `;
+  loadCustomers();
+}
+
+async function loadCustomers() {
+  const params = new URLSearchParams({ page: _custPage, limit: 30, search: _custSearch });
+  const r = await api(`/api/customers?${params}`);
+  if (!r) return;
+  const tb = document.getElementById('cust-tbody');
+  const ct = document.getElementById('cust-count');
+  if (ct) ct.textContent = `${r.total} customers`;
+  if (!r.customers.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="8">No customers yet. Upload a CSV or add one above.</td></tr>';
+    return;
+  }
+  tb.innerHTML = r.customers.map(c => `
+    <tr>
+      <td>${esc(c.name)}</td>
+      <td style="font-family:monospace">${esc(c.phone)}</td>
+      <td>${esc(c.account_number||'—')}</td>
+      <td>${c.emi_amount ? '₹'+esc(c.emi_amount) : '—'}</td>
+      <td>${c.total_due ? '₹'+esc(c.total_due) : '—'}</td>
+      <td>${esc(c.overdue_months||'—')}</td>
+      <td>${fmtDate(c.created_at)}</td>
+      <td><button class="btn-ghost" style="color:var(--red);font-size:.75rem" onclick="deleteCustomer(${c.id})">Delete</button></td>
+    </tr>`).join('');
+  const pages = Math.ceil(r.total / 30);
+  const pg = document.getElementById('cust-pager');
+  if (pg) pg.innerHTML = pages > 1 ? Array.from({length:pages},(_,i)=>
+    `<button class="btn${i+1===_custPage?'':'-ghost'}" style="padding:.3rem .6rem;font-size:.75rem" onclick="_custPage=${i+1};loadCustomers()">${i+1}</button>`).join('') : '';
+}
+
+async function addCustomer() {
+  const name = document.getElementById('add-name').value.trim();
+  const phone = document.getElementById('add-phone').value.trim();
+  const msg = document.getElementById('add-cust-msg');
+  if (!name || !phone) { msg.innerHTML = '<span style="color:var(--red)">Name and phone are required.</span>'; return; }
+  const body = { name, phone,
+    account_number: document.getElementById('add-acc').value.trim()||null,
+    emi_amount: document.getElementById('add-emi').value.trim()||null,
+    total_due: document.getElementById('add-due').value.trim()||null,
+    overdue_months: document.getElementById('add-months').value.trim()||null,
+  };
+  const r = await api('/api/customers', { method:'POST', body: JSON.stringify(body) });
+  if (r) {
+    msg.innerHTML = `<span style="color:var(--green)">Added ${esc(r.name)} (${esc(r.phone)})</span>`;
+    ['add-name','add-phone','add-acc','add-emi','add-due','add-months'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+    loadCustomers();
+  }
+}
+
+async function deleteCustomer(id) {
+  if (!confirm('Delete this customer?')) return;
+  const r = await api(`/api/customers/${id}`, { method:'DELETE' });
+  if (r) loadCustomers();
+}
+
+async function handleCsvDrop(e) {
+  e.preventDefault();
+  document.getElementById('csv-drop-zone').style.borderColor = 'var(--border)';
+  const file = e.dataTransfer.files[0];
+  if (file) uploadCsv(file);
+}
+
+async function uploadCsv(file) {
+  if (!file) return;
+  const res = document.getElementById('csv-result');
+  res.textContent = 'Uploading…';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const resp = await fetch('/api/customers/upload', { method:'POST', headers:{ Authorization:`Bearer ${token}` }, body:fd });
+    const data = await resp.json();
+    if (!resp.ok) { res.innerHTML = `<span style="color:var(--red)">${esc(data.detail||'Upload failed')}</span>`; return; }
+    res.innerHTML = `<span style="color:var(--green)">Imported ${data.imported} customers.</span>` +
+      (data.errors.length ? ` <span style="color:var(--amber)">${data.errors.length} row(s) skipped.</span>` : '');
+    loadCustomers();
+  } catch(e) { res.innerHTML = `<span style="color:var(--red)">Upload error: ${esc(e.message)}</span>`; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Campaigns Page
+// ═══════════════════════════════════════════════════════════════
+let _campaignPollTimer = null;
+
+async function renderCampaigns(el) {
+  el.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:1rem">
+      <button class="btn" onclick="openNewCampaignModal()">+ New Campaign</button>
+    </div>
+    <div id="campaign-list">Loading…</div>
+
+    <!-- New Campaign Modal -->
+    <div id="camp-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:none;align-items:center;justify-content:center" onclick="if(event.target===this)closeModal('camp-modal')">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2rem;width:min(700px,96vw);max-height:90vh;overflow-y:auto">
+        <h3 style="margin-bottom:1.25rem">New Campaign</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem">
+          <div><label class="field-label">Campaign Name *</label><input id="camp-name" class="input" style="width:100%" placeholder="May Collection Run"></div>
+          <div><label class="field-label">Provider *</label>
+            <select id="camp-provider" class="input" style="width:100%">
+              <option value="twilio">Twilio</option>
+              <option value="exotel">Exotel</option>
+            </select></div>
+          <div><label class="field-label">STT</label>
+            <select id="camp-stt" class="input" style="width:100%">
+              <option value="deepgram">Deepgram</option>
+              <option value="sarvam">Sarvam</option>
+            </select></div>
+          <div><label class="field-label">TTS</label>
+            <select id="camp-tts" class="input" style="width:100%">
+              <option value="openai">OpenAI</option>
+              <option value="edge">Edge TTS (free)</option>
+              <option value="sarvam">Sarvam</option>
+            </select></div>
+          <div><label class="field-label">LLM</label>
+            <select id="camp-llm" class="input" style="width:100%">
+              <option value="openai">OpenAI GPT-4o</option>
+              <option value="ollama">Groq / Ollama</option>
+            </select></div>
+        </div>
+        <div style="margin-bottom:.5rem;font-weight:600;font-size:.85rem">Select Customers</div>
+        <input id="camp-cust-search" class="input" style="width:100%;margin-bottom:.5rem" placeholder="Search customers…" oninput="filterCampCustomers(this.value)">
+        <div id="camp-cust-list" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:.4rem">Loading…</div>
+        <div style="font-size:.75rem;color:var(--muted);margin-top:.3rem" id="camp-cust-count">0 selected</div>
+        <div style="display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem">
+          <button class="btn-ghost" onclick="closeModal('camp-modal')">Cancel</button>
+          <button class="btn" onclick="createCampaign()">Create Campaign</button>
+        </div>
+        <div id="camp-create-msg" style="margin-top:.4rem;font-size:.8rem"></div>
+      </div>
+    </div>
+  `;
+  loadCampaigns();
+  if (_campaignPollTimer) clearInterval(_campaignPollTimer);
+  _campaignPollTimer = setInterval(loadCampaigns, 5000);
+}
+
+let _allCampCustomers = [];
+async function openNewCampaignModal() {
+  document.getElementById('camp-modal').style.display = 'flex';
+  const r = await api('/api/customers?limit=500');
+  if (!r) return;
+  _allCampCustomers = r.customers || [];
+  renderCampCustomerList(_allCampCustomers);
+}
+
+function filterCampCustomers(q) {
+  const filtered = _allCampCustomers.filter(c =>
+    c.name.toLowerCase().includes(q.toLowerCase()) || c.phone.includes(q));
+  renderCampCustomerList(filtered);
+}
+
+function renderCampCustomerList(customers) {
+  const el = document.getElementById('camp-cust-list');
+  if (!el) return;
+  if (!customers.length) { el.innerHTML = '<div style="padding:.5rem;color:var(--muted)">No customers found.</div>'; return; }
+  el.innerHTML = customers.map(c => `
+    <label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;border-radius:6px;cursor:pointer;transition:background .1s" onmouseover="this.style.background='rgba(255,255,255,.04)'" onmouseout="this.style.background=''">
+      <input type="checkbox" class="camp-cust-cb" value="${c.id}" onchange="updateCampCount()">
+      <span style="flex:1">${esc(c.name)}</span>
+      <span style="font-size:.75rem;color:var(--muted);font-family:monospace">${esc(c.phone)}</span>
+      <span style="font-size:.72rem;color:var(--faint)">${c.total_due ? '₹'+c.total_due+' due' : ''}</span>
+    </label>`).join('');
+}
+
+function updateCampCount() {
+  const n = document.querySelectorAll('.camp-cust-cb:checked').length;
+  const el = document.getElementById('camp-cust-count');
+  if (el) el.textContent = `${n} selected`;
+}
+
+function closeModal(id) { const el = document.getElementById(id); if(el) el.style.display='none'; }
+
+async function createCampaign() {
+  const name = (document.getElementById('camp-name').value||'').trim();
+  const provider = document.getElementById('camp-provider').value;
+  const stt = document.getElementById('camp-stt').value;
+  const tts = document.getElementById('camp-tts').value;
+  const llm = document.getElementById('camp-llm').value;
+  const ids = [...document.querySelectorAll('.camp-cust-cb:checked')].map(cb => parseInt(cb.value));
+  const msg = document.getElementById('camp-create-msg');
+  if (!name) { msg.innerHTML = '<span style="color:var(--red)">Name is required.</span>'; return; }
+  if (!ids.length) { msg.innerHTML = '<span style="color:var(--red)">Select at least one customer.</span>'; return; }
+  const r = await api('/api/campaigns', { method:'POST', body: JSON.stringify({ name, provider, stt, tts, llm, customer_ids: ids }) });
+  if (r) {
+    closeModal('camp-modal');
+    loadCampaigns();
+  }
+}
+
+async function loadCampaigns() {
+  const camps = await api('/api/campaigns');
+  if (!camps) return;
+  const el = document.getElementById('campaign-list');
+  if (!el) { clearInterval(_campaignPollTimer); return; }
+  if (!camps.length) {
+    el.innerHTML = '<div style="color:var(--muted);padding:2rem;text-align:center">No campaigns yet. Create one above.</div>';
+    return;
+  }
+  el.innerHTML = camps.map(c => {
+    const progress = c.total_customers ? Math.round(c.calls_completed / c.total_customers * 100) : 0;
+    const statusColor = { running:'var(--green)', paused:'var(--amber)', completed:'var(--blue)', draft:'var(--muted)' }[c.status]||'var(--muted)';
+    return `
+    <div class="card" style="margin-bottom:.75rem">
+      <div style="display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px">
+          <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem">
+            <span style="font-weight:600">${esc(c.name)}</span>
+            <span style="padding:.15rem .45rem;border-radius:99px;font-size:.7rem;font-weight:600;background:${statusColor}22;color:${statusColor};text-transform:capitalize">${c.status}</span>
+            <span style="font-size:.72rem;color:var(--muted)">${c.provider}</span>
+          </div>
+          <div style="background:var(--border);border-radius:99px;height:6px;margin-bottom:.3rem;overflow:hidden">
+            <div style="background:var(--accent);height:100%;width:${progress}%;border-radius:99px;transition:width .3s"></div>
+          </div>
+          <div style="font-size:.75rem;color:var(--muted)">${c.calls_completed}/${c.total_customers} completed • ${c.ptp_count} PTP • ${c.payment_confirmed_count} paid</div>
+        </div>
+        <div style="display:flex;gap:.4rem;align-items:center;flex-shrink:0">
+          ${c.status==='draft'||c.status==='paused' ? `<button class="btn" style="padding:.35rem .9rem;font-size:.8rem" onclick="startCampaign(${c.id})">▶ ${c.status==='paused'?'Resume':'Start'}</button>` : ''}
+          ${c.status==='running' ? `<button class="btn-ghost" style="padding:.35rem .9rem;font-size:.8rem" onclick="pauseCampaign(${c.id})">⏸ Pause</button>` : ''}
+          <button class="btn-ghost" style="padding:.35rem .9rem;font-size:.8rem" onclick="toggleCampaignDetail(${c.id})">Details</button>
+        </div>
+      </div>
+      <div id="camp-detail-${c.id}" style="display:none;margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem"></div>
+    </div>`;
+  }).join('');
+}
+
+async function startCampaign(id) {
+  const r = await api(`/api/campaigns/${id}/start`, { method:'POST' });
+  if (r) loadCampaigns();
+}
+
+async function pauseCampaign(id) {
+  const r = await api(`/api/campaigns/${id}/pause`, { method:'POST' });
+  if (r) loadCampaigns();
+}
+
+async function toggleCampaignDetail(id) {
+  const el = document.getElementById(`camp-detail-${id}`);
+  if (!el) return;
+  if (el.style.display === 'block') { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = 'Loading calls…';
+  const calls = await api(`/api/campaigns/${id}/calls`);
+  if (!calls || !calls.length) { el.innerHTML = '<span style="color:var(--muted)">No calls yet.</span>'; return; }
+  const statusColor = s => ({ pending:'var(--muted)', dialing:'var(--amber)', in_progress:'var(--blue)', completed:'var(--green)', failed:'var(--red)', no_answer:'var(--red)', busy:'var(--amber)' }[s]||'var(--muted)');
+  const outcomeBadge = o => { const m = { ptp:'PTP', callback:'Callback', wrong_person:'Wrong Person', incomplete:'Incomplete', payment_confirmed:'Paid ✓' }; return o ? `<span style="font-size:.7rem;padding:.1rem .35rem;border-radius:4px;background:rgba(99,102,241,.15);color:var(--accent)">${m[o]||o}</span>` : ''; };
+  el.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Customer</th><th>Phone</th><th>Status</th><th>Outcome</th><th>Payment</th><th>Duration</th><th>Time</th></tr></thead><tbody>
+    ${calls.map(cc=>`<tr>
+      <td>${esc(cc.customer_name)}</td>
+      <td style="font-family:monospace;font-size:.78rem">${esc(cc.customer_phone)}</td>
+      <td><span style="color:${statusColor(cc.call_status)}">${cc.call_status}</span></td>
+      <td>${outcomeBadge(cc.outcome)}</td>
+      <td>${cc.payment_amount ? '₹'+cc.payment_amount : '—'} ${cc.has_receipt===true?'🧾':cc.has_receipt===false?'(no receipt)':''}</td>
+      <td>${fmtDuration(cc.duration_seconds)}</td>
+      <td>${fmtDate(cc.started_at)}</td>
+    </tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+function esc(s) {
+  if (!s && s !== 0) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ═══════════════════════════════════════════════════════════════

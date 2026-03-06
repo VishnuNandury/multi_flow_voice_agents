@@ -27,6 +27,10 @@ services:
       # - key: DATABASE_URL
       #   sync: false
 
+      # --- inya.ai (6th pipeline — external agent webhook) ---
+      - key: INYA_WEBHOOK_SECRET
+        sync: false
+
       # --- Sarvam AI (v2 — 5th pipeline) ---
       - key: SARVAM_API_KEY
         sync: false
@@ -40,6 +44,31 @@ services:
       #   sync: false
       # - key: OLLAMA_MODEL
       #   value: llama3.1
+
+      # --- Outbound Campaigns: Required ---
+      # Your Render app's public URL — used to build Twilio/Exotel webhook URLs
+      - key: PUBLIC_URL
+        sync: false
+
+      # --- Twilio (outbound calling — provider option 1) ---
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+
+      # --- Exotel (outbound calling — provider option 2, India-based) ---
+      - key: EXOTEL_API_KEY
+        sync: false
+      - key: EXOTEL_API_TOKEN
+        sync: false
+      - key: EXOTEL_SID
+        sync: false
+      - key: EXOTEL_SUBDOMAIN
+        value: api.exotel.com
+      - key: EXOTEL_PHONE_NUMBER
+        sync: false
 
       # --- TURN Server ---
       - key: TURN_URL

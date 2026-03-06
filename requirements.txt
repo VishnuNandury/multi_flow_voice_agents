@@ -30,3 +30,9 @@ psycopg2-binary>=2.9.0
 # Authentication
 python-jose[cryptography]>=3.3.0
 bcrypt>=4.0.0
+
+# Outbound calling
+twilio>=8.0.0
+
+# File uploads
+python-multipart>=0.0.6
