@@ -1028,6 +1028,7 @@ async def telephony_ws(websocket: WebSocket, call_id: int):
         tts_type=tts_type,
         llm_type=llm_type,
         provider=provider,
+        aiohttp_session=_aiohttp_session,
     )
 
 
@@ -1079,7 +1080,7 @@ async def whatsapp_webhook(
 
     async def whatsapp_connection_callback(connection: SmallWebRTCConnection):
         logger.info(f"WhatsApp WebRTC connection established (STT={stt}, TTS={tts}, LLM={llm})")
-        background_tasks.add_task(bot_module.run_bot, connection, stt, tts, llm, agent_config)
+        background_tasks.add_task(bot_module.run_bot, connection, stt, tts, llm, agent_config, _aiohttp_session)
 
     try:
         ok = await _whatsapp_client.handle_webhook_request(
@@ -1254,7 +1255,7 @@ async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
 
     async def webrtc_connection_callback(connection: SmallWebRTCConnection):
         logger.info(f"WebRTC connection established (STT={stt}, TTS={tts}, LLM={llm})")
-        background_tasks.add_task(bot_module.run_bot, connection, stt, tts, llm, agent_config)
+        background_tasks.add_task(bot_module.run_bot, connection, stt, tts, llm, agent_config, _aiohttp_session)
 
     try:
         answer = await small_webrtc_handler.handle_web_request(

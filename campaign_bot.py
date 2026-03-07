@@ -53,7 +53,7 @@ from pipecat.processors.aggregators.dtmf_aggregator import DTMFAggregator
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.tts import OpenAITTSService
-from pipecat.services.sarvam.tts import SarvamTTSService
+from pipecat.services.sarvam.tts import SarvamHttpTTSService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.websocket.fastapi import (
@@ -666,6 +666,7 @@ async def run_campaign_bot(
     tts_type: str = "openai",
     llm_type: str = "openai",
     provider: str = "twilio",
+    aiohttp_session=None,
 ):
     """
     Run the outbound call bot over a WebSocket connection.
@@ -726,7 +727,7 @@ async def run_campaign_bot(
 
     # --- Services ---
     stt = create_stt(stt_type)
-    tts = create_tts(tts_type)
+    tts = create_tts(tts_type, aiohttp_session=aiohttp_session)
     llm = create_llm(llm_type)
 
     # --- Context ---

@@ -52,7 +52,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.openai.tts import OpenAITTSService
-from pipecat.services.sarvam.tts import SarvamTTSService
+from pipecat.services.sarvam.tts import SarvamHttpTTSService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.ollama.llm import OLLamaLLMService
 from pipecat.transcriptions.language import Language
@@ -799,21 +799,20 @@ def create_stt(stt_type: str):
         )
 
 
-def create_tts(tts_type: str):
+def create_tts(tts_type: str, aiohttp_session=None):
     """Create TTS service based on type."""
     if tts_type == "sarvam":
         sarvam_model = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
         sarvam_voice = os.getenv("SARVAM_TTS_VOICE", "Priya")
-        logger.info(f"TTS: Sarvam {sarvam_model} ({sarvam_voice})")
-        return SarvamTTSService(
+        logger.info(f"TTS: Sarvam HTTP {sarvam_model} ({sarvam_voice})")
+        return SarvamHttpTTSService(
             api_key=os.getenv("SARVAM_API_KEY", ""),
+            aiohttp_session=aiohttp_session,
             model=sarvam_model,
             voice_id=sarvam_voice,
-            params=SarvamTTSService.InputParams(
+            params=SarvamHttpTTSService.InputParams(
                 language=Language.HI,
-                # bulbul:v3 uses temperature (0.01-1.0); bulbul:v2 uses pitch/pace/loudness
-                # The same InputParams class handles both — unused params are ignored per model
-                temperature=0.65,   # slightly focused, natural delivery
+                temperature=0.65,
             ),
         )
     elif tts_type == "edge":
@@ -823,15 +822,11 @@ def create_tts(tts_type: str):
             rate=os.getenv("EDGE_TTS_RATE", "+0%"),
         )
     else:
-        logger.info("TTS: OpenAI TTS (shimmer)")
+        logger.info("TTS: OpenAI TTS (tts-1, shimmer)")
         return OpenAITTSService(
             api_key=os.getenv("OPENAI_API_KEY"),
+            model="tts-1",
             voice=os.getenv("OPENAI_TTS_VOICE", "shimmer"),
-            instructions=(
-                "You are Priya, a warm and professional Indian woman speaking on a phone call. "
-                "Speak naturally in Hindi and Hinglish with clear pronunciation. "
-                "Use a conversational, friendly tone. Do not rush."
-            ),
         )
 
 
@@ -882,6 +877,7 @@ async def run_bot(
     tts_type: str = "openai",
     llm_type: str = "openai",
     agent_config: dict = None,
+    aiohttp_session=None,
 ):
     """Create and run the voice agent pipeline with PipeCat Flows."""
 
@@ -900,7 +896,7 @@ async def run_bot(
 
     # --- Services ---
     stt = create_stt(stt_type)
-    tts = create_tts(tts_type)
+    tts = create_tts(tts_type, aiohttp_session=aiohttp_session)
     llm = create_llm(llm_type)
 
     # --- Context (empty — FlowManager populates it per node) ---

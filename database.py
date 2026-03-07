@@ -184,6 +184,23 @@ def init_db():
     os.makedirs("data", exist_ok=True)
     Base.metadata.create_all(bind=engine)
 
+    # Migrate: add columns that may be missing from pre-existing databases.
+    # SQLAlchemy create_all() never alters existing tables, so we do it explicitly.
+    # IF NOT EXISTS is supported by both SQLite and PostgreSQL.
+    from sqlalchemy import text
+    _migrations = [
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS payment_amount FLOAT",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS has_receipt BOOLEAN",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS metrics_json TEXT",
+    ]
+    with engine.connect() as conn:
+        for stmt in _migrations:
+            try:
+                conn.execute(text(stmt))
+            except Exception:
+                pass  # column already exists or unsupported syntax
+        conn.commit()
+
     db: Session = SessionLocal()
     try:
         admin_username = os.getenv("ADMIN_USERNAME", "admin")
