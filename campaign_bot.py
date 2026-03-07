@@ -31,9 +31,19 @@ from deepgram import LiveOptions
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    MetricsFrame,
+    BotStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
     TextFrame,
     TranscriptionFrame,
 )
+from pipecat.metrics.metrics import (
+    TTFBMetricsData, ProcessingMetricsData, LLMUsageMetricsData, TTSUsageMetricsData,
+)
+from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -125,6 +135,92 @@ def _db_save_campaign_sync(call_id: int, data: dict):
 
 
 # ---------------------------------------------------------------------------
+# Metrics observer (reuses same logic as bot.py SessionMetricsObserver)
+# ---------------------------------------------------------------------------
+
+class CampaignMetricsObserver(BaseObserver):
+    """Captures pipecat MetricsFrame data + turn latency into campaign_sessions."""
+
+    _MAX = 200
+
+    def __init__(self, call_id: int):
+        super().__init__()
+        self._call_id = call_id
+        self._seen_ids: set = set()
+        self._user_stopped_at: float = 0.0
+
+    async def on_push_frame(self, data: FramePushed):
+        frame = data.frame
+        if isinstance(frame, MetricsFrame):
+            if frame.id in self._seen_ids:
+                return
+            self._seen_ids.add(frame.id)
+            self._handle_metrics(frame)
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._user_stopped_at = time.monotonic()
+        elif isinstance(frame, BotStartedSpeakingFrame) and self._user_stopped_at:
+            latency = round(time.monotonic() - self._user_stopped_at, 3)
+            self._user_stopped_at = 0.0
+            self._append("turn_latency", latency)
+
+    def _m(self) -> dict:
+        sd = campaign_sessions.get(self._call_id)
+        if sd is None:
+            return {}
+        return sd.setdefault("metrics", {
+            "ttfb": [], "processing": [], "llm_tokens": [],
+            "tts_chars": [], "turn_latency": [],
+        })
+
+    def _append(self, key: str, value):
+        m = self._m()
+        if m and len(m.get(key, [])) < self._MAX:
+            m[key].append(value)
+
+    def _handle_metrics(self, frame: MetricsFrame):
+        m = self._m()
+        if not m:
+            return
+        for item in frame.data:
+            if isinstance(item, TTFBMetricsData):
+                if len(m["ttfb"]) < self._MAX:
+                    m["ttfb"].append({"p": item.processor, "model": item.model, "v": round(item.value, 4)})
+            elif isinstance(item, ProcessingMetricsData):
+                if len(m["processing"]) < self._MAX:
+                    m["processing"].append({"p": item.processor, "v": round(item.value, 4)})
+            elif isinstance(item, LLMUsageMetricsData):
+                if len(m["llm_tokens"]) < self._MAX:
+                    tok = item.value
+                    m["llm_tokens"].append({"p": item.processor, "model": item.model, "in": tok.prompt_tokens, "out": tok.completion_tokens})
+            elif isinstance(item, TTSUsageMetricsData):
+                if len(m["tts_chars"]) < self._MAX:
+                    m["tts_chars"].append({"p": item.processor, "chars": item.value})
+
+
+def _summarize_metrics(raw: dict) -> dict:
+    def avg(lst, key):
+        vals = [x[key] for x in lst if key in x]
+        return round(sum(vals) / len(vals), 4) if vals else None
+
+    def by_type(lst, keyword):
+        return [x for x in lst if keyword.lower() in x.get("p", "").lower()]
+
+    ttfb = raw.get("ttfb", [])
+    llm_tokens = raw.get("llm_tokens", [])
+    tts = raw.get("tts_chars", [])
+    return {
+        "stt_ttfb_avg": avg(by_type(ttfb, "STT") or by_type(ttfb, "Deepgram") or by_type(ttfb, "Sarvam"), "v"),
+        "llm_ttfb_avg": avg(by_type(ttfb, "LLM") or by_type(ttfb, "OpenAI") or by_type(ttfb, "Ollama"), "v"),
+        "tts_ttfb_avg": avg(by_type(ttfb, "TTS"), "v"),
+        "tokens_in":  sum(x.get("in", 0) for x in llm_tokens),
+        "tokens_out": sum(x.get("out", 0) for x in llm_tokens),
+        "llm_calls":  len(llm_tokens),
+        "tts_chars":  sum(x.get("chars", 0) for x in tts),
+        "turn_latency": raw.get("turn_latency", []),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Transcript capture processors
 # ---------------------------------------------------------------------------
 
@@ -144,21 +240,28 @@ class UserTranscriptCapture(FrameProcessor):
 
 
 class AssistantTranscriptCapture(FrameProcessor):
+    """Captures each LLM response turn individually using LLMFullResponse frames."""
+
     def __init__(self, call_id: int):
         super().__init__()
         self._call_id = call_id
         self._buf = ""
+        self._capturing = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if isinstance(frame, TextFrame) and frame.text:
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._buf = ""
+            self._capturing = True
+        elif isinstance(frame, TextFrame) and self._capturing and frame.text:
             self._buf += frame.text
-        elif isinstance(frame, EndFrame):
+        elif isinstance(frame, LLMFullResponseEndFrame):
             if self._buf.strip() and self._call_id in campaign_sessions:
                 campaign_sessions[self._call_id].setdefault("transcript", []).append(
                     {"role": "assistant", "text": self._buf.strip()}
                 )
             self._buf = ""
+            self._capturing = False
         await self.push_frame(frame, direction)
 
 
@@ -655,6 +758,11 @@ async def run_campaign_bot(
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        observers=[
+            MetricsLogObserver(),
+            CampaignMetricsObserver(call_id),
+        ],
+        idle_timeout_secs=180,
     )
 
     # --- Flow Manager ---
@@ -679,6 +787,10 @@ async def run_campaign_bot(
         "payment_plan": None,
         "payment_date": None,
         "agent_config": cfg,
+        "metrics": {
+            "ttfb": [], "processing": [], "llm_tokens": [],
+            "tts_chars": [], "turn_latency": [],
+        },
     }
 
     # --- Event handlers ---
@@ -696,6 +808,8 @@ async def run_campaign_bot(
             if not data.get("outcome"):
                 data["outcome"] = "incomplete"
             data["end_time"] = time.time()
+            raw_metrics = data.pop("metrics", {})
+            data["metrics_summary"] = _summarize_metrics(raw_metrics)
             asyncio.create_task(_save_campaign_conversation(call_id, data))
 
         # Signal campaign runner that call is done

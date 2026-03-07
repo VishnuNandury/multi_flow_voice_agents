@@ -78,8 +78,8 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Ro
 .content{flex:1;overflow-y:auto;padding:1.5rem}
 
 /* ── Cards / KPIs ───────────────────────────── */
-.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem}
-.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem 1.5rem}
+.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-bottom:1.5rem}
+.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem 1.25rem}
 .kpi-label{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:.5rem}
 .kpi-value{font-size:1.75rem;font-weight:700;color:var(--text);line-height:1}
 .kpi-sub{font-size:.7rem;color:var(--muted);margin-top:.35rem}
@@ -107,6 +107,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Ro
 .badge-tts{background:rgba(167,139,250,.12);color:#a78bfa}
 .badge-llm{background:rgba(16,185,129,.12);color:#34d399}
 .badge-ptp{background:rgba(16,185,129,.12);color:#34d399}
+.badge-payment_confirmed{background:rgba(16,185,129,.18);color:#10b981;font-weight:600}
 .badge-callback{background:rgba(245,158,11,.12);color:#fbbf24}
 .badge-incomplete{background:rgba(75,93,115,.12);color:#94a3b8}
 .badge-wrong_person{background:rgba(239,68,68,.12);color:#f87171}
@@ -139,18 +140,21 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Ro
 .cfg-field input,.cfg-field select{width:100%;padding:.38rem .55rem;border-radius:6px;border:1px solid var(--border);background:#0b0f1a;color:var(--text);font-size:.78rem;outline:none;transition:border-color .15s}
 .cfg-field input:focus,.cfg-field select:focus{border-color:var(--accent)}
 .cfg-field-row{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+/* ── Flow stage list (read-only, inside Agent Config) ─ */
+.flow-stages{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.5rem}
+.flow-stage{background:#0b0f1a;border:1px solid var(--border);border-radius:8px;padding:.6rem .75rem;position:relative}
+.flow-stage.terminal{border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.04)}
+.flow-stage-num{position:absolute;top:.45rem;right:.55rem;font-size:.58rem;font-weight:700;color:var(--faint)}
+.flow-stage-name{font-size:.75rem;font-weight:600;color:var(--text);margin-bottom:.25rem}
+.flow-stage-desc{font-size:.65rem;color:var(--muted);line-height:1.4}
+.flow-stage-badge{display:inline-block;font-size:.58rem;padding:.1rem .35rem;border-radius:4px;background:rgba(99,102,241,.12);color:var(--accent);margin-top:.3rem;font-weight:600}
+.flow-stage.terminal .flow-stage-badge{background:rgba(245,158,11,.12);color:var(--amber)}
+.flow-edges-note{margin-top:.6rem;font-size:.65rem;color:var(--faint);display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
+.edge-pill{background:rgba(99,102,241,.08);border:1px solid var(--border);border-radius:9999px;padding:.1rem .45rem;font-size:.6rem;color:var(--muted);white-space:nowrap}
 
-/* ── Flow bar (in agent page) ───────────────── */
-.flow-bar{display:flex;align-items:center;justify-content:center;padding:.65rem 1rem;background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:1rem;overflow-x:auto;gap:0}
-.flow-step{display:flex;align-items:center;white-space:nowrap}
-.flow-dot{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:700;border:2px solid var(--faint);background:transparent;color:var(--faint);transition:all .3s;flex-shrink:0}
-.flow-dot.active{border-color:var(--blue);background:var(--blue);color:#fff;box-shadow:0 0 10px rgba(59,130,246,.4)}
-.flow-dot.done{border-color:var(--green);background:var(--green);color:#fff}
-.flow-label{font-size:.6rem;color:var(--faint);margin:0 .3rem;transition:color .3s}
-.flow-label.active{color:#93c5fd;font-weight:600}
-.flow-label.done{color:#6ee7b7}
-.flow-connector{width:18px;height:2px;background:var(--border);flex-shrink:0;transition:background .3s}
-.flow-connector.done{background:var(--green)}
+/* ── Flow graph (in agent page) ─────────────── */
+.flow-graph-wrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:1rem;padding:.5rem;overflow-x:auto}
+.flow-graph-wrap svg{display:block;margin:0 auto}
 
 /* ── iframe container ───────────────────────── */
 .client-bar{display:flex;align-items:center;justify-content:space-between;padding:.55rem 1rem;background:var(--surface);border:1px solid var(--border);border-radius:10px 10px 0 0;margin-bottom:0}
@@ -178,6 +182,25 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Ro
 .modal-meta{padding:.75rem 1.25rem;border-bottom:1px solid var(--border);display:flex;gap:1rem;flex-wrap:wrap;font-size:.75rem;color:var(--muted)}
 .modal-meta span{display:flex;align-items:center;gap:.3rem}
 .modal-body{overflow-y:auto;padding:1rem 1.25rem;display:flex;flex-direction:column;gap:.6rem}
+/* ── Metrics panel inside transcript modal ──── */
+.metrics-panel{border-bottom:1px solid var(--border);padding:.65rem 1.25rem}
+.metrics-toggle{background:none;border:none;color:var(--muted);font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:.4rem;padding:0;text-transform:uppercase;letter-spacing:.05em;width:100%;justify-content:space-between}
+.metrics-toggle:hover{color:var(--text)}
+.metrics-toggle .arr{transition:transform .2s;font-size:.65rem}
+.metrics-toggle.open .arr{transform:rotate(180deg)}
+.metrics-grid{display:none;margin-top:.65rem;grid-template-columns:repeat(4,1fr);gap:.5rem}
+.metrics-grid.visible{display:grid}
+.m-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.55rem .65rem;text-align:center}
+.m-val{font-size:1.05rem;font-weight:700;color:var(--text);line-height:1.2}
+.m-val.fast{color:var(--green)}.m-val.slow{color:var(--amber)}.m-val.dim{color:var(--faint)}
+.m-label{font-size:.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:.15rem}
+.m-sub{font-size:.6rem;color:var(--faint);margin-top:.1rem}
+.latency-row{margin-top:.6rem}
+.latency-title{font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.3rem}
+.latency-bars{display:flex;align-items:flex-end;gap:2px;height:36px;padding:0 2px}
+.l-bar{flex:1;min-width:4px;max-width:32px;border-radius:2px 2px 0 0;cursor:default;position:relative}
+.l-bar.fast{background:var(--green)}.l-bar.med{background:var(--accent)}.l-bar.slow{background:var(--amber)}
+.l-bar:hover::after{content:attr(title);position:absolute;bottom:110%;left:50%;transform:translateX(-50%);background:#111;color:#fff;font-size:.6rem;padding:.15rem .3rem;border-radius:4px;white-space:nowrap;pointer-events:none;z-index:10}
 .msg{padding:.6rem .85rem;border-radius:10px;font-size:.8rem;line-height:1.4;max-width:88%}
 .msg.user{background:rgba(59,130,246,.12);color:#93c5fd;align-self:flex-start;border-radius:10px 10px 10px 2px}
 .msg.assistant{background:rgba(99,102,241,.12);color:#c4b5fd;align-self:flex-end;border-radius:10px 10px 2px 10px}
@@ -344,6 +367,7 @@ select.input{cursor:pointer}
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div class="modal-meta" id="modal-meta"></div>
+    <div id="modal-metrics"></div>
     <div class="modal-body" id="modal-body"></div>
   </div>
 </div>
@@ -361,10 +385,21 @@ const PIPELINES = [
   { type:'inya', label:'inya.ai Agent', desc:'Full-stack Indian voice AI managed by inya.ai (by Gnani.ai). inya handles STT, TTS and LLM. Calls are initiated via inya and outcomes sync back here.', requires:['inya'], featured:true },
 ];
 
-const FLOW_NODES = [
+let FLOW_NODES = [
   {id:'greeting',label:'Greeting'},{id:'overdue_info',label:'Overdue Info'},
   {id:'understand_situation',label:'Situation'},{id:'payment_options',label:'Options'},
   {id:'commitment',label:'Commitment'},{id:'promise_to_pay',label:'PTP'},{id:'end',label:'Complete'},
+  {id:'wrong_person',label:'Wrong Person',terminal:true},{id:'callback',label:'Callback',terminal:true},
+];
+let FLOW_EDGES = [
+  {from:'greeting',to:'overdue_info',label:'confirmed'},
+  {from:'greeting',to:'wrong_person',label:'wrong person'},
+  {from:'overdue_info',to:'understand_situation',label:''},
+  {from:'understand_situation',to:'payment_options',label:''},
+  {from:'payment_options',to:'commitment',label:'agreed'},
+  {from:'payment_options',to:'callback',label:'callback'},
+  {from:'commitment',to:'promise_to_pay',label:''},
+  {from:'promise_to_pay',to:'end',label:''},
 ];
 
 // ═══════════════════════════════════════════════════════════════
@@ -504,7 +539,8 @@ async function renderDashboard(el) {
   el.innerHTML = `
     <div class="kpi-grid">
       <div class="kpi-card"><div class="kpi-label">Total Calls</div><div class="kpi-value" id="kpi-total">—</div><div class="kpi-sub">All time</div></div>
-      <div class="kpi-card"><div class="kpi-label">PTP Rate</div><div class="kpi-value green" id="kpi-ptp">—</div><div class="kpi-sub">Completed calls</div></div>
+      <div class="kpi-card"><div class="kpi-label">PTP Rate</div><div class="kpi-value green" id="kpi-ptp">—</div><div class="kpi-sub">Of completed calls</div></div>
+      <div class="kpi-card"><div class="kpi-label">Payments Confirmed</div><div class="kpi-value green" id="kpi-paid">—</div><div class="kpi-sub">Already paid</div></div>
       <div class="kpi-card"><div class="kpi-label">Avg Duration</div><div class="kpi-value amber" id="kpi-dur">—</div><div class="kpi-sub">Per call</div></div>
       <div class="kpi-card"><div class="kpi-label">Est. Cost</div><div class="kpi-value" id="kpi-cost">—</div><div class="kpi-sub">All time (USD)</div></div>
     </div>
@@ -523,6 +559,7 @@ async function renderDashboard(el) {
     if (!stats) return;
     document.getElementById('kpi-total').textContent = stats.total;
     document.getElementById('kpi-ptp').textContent = stats.ptp_count + ' / ' + (stats.ptp_rate*100).toFixed(0)+'%';
+    document.getElementById('kpi-paid').textContent = stats.payment_confirmed_count || 0;
     document.getElementById('kpi-dur').textContent = fmtDuration(stats.avg_duration_seconds);
     document.getElementById('kpi-cost').textContent = '$' + stats.total_cost_usd.toFixed(4);
 
@@ -581,9 +618,58 @@ function renderAgent(el) {
         </div>
       </div>
     </div>
+      <div style="margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+          <h4 style="margin:0">Conversation Flow</h4>
+          <span style="font-size:.62rem;color:var(--faint);background:rgba(99,102,241,.08);border:1px solid var(--border);border-radius:6px;padding:.15rem .5rem">read-only · PipeCat Flows</span>
+        </div>
+        ${buildFlowStageList()}
+      </div>
+    </div>
     <div class="pipeline-grid" id="pipeline-grid"></div>
     <div id="live-area"></div>`;
   buildPipelineCards();
+}
+
+// Flow stage descriptions — matches FLOW_NODES / FLOW_EDGES in bot.py
+const FLOW_STAGE_META = {
+  greeting:             { desc: 'Confirm you are speaking with the right borrower. Offers a callback if it is a wrong number.', step: 1 },
+  overdue_info:         { desc: 'Inform the borrower of their overdue amount, months outstanding, and any late fees.', step: 2 },
+  understand_situation: { desc: 'Listen empathetically to why the payment was missed. Understand their current financial situation.', step: 3 },
+  payment_options:      { desc: 'Present available options: pay in full, set up a part-payment, or schedule a callback for a later date.', step: 4 },
+  commitment:           { desc: "Confirm the borrower's chosen path and set a specific date commitment if they agree to pay.", step: 5 },
+  promise_to_pay:       { desc: 'Record the Promise-to-Pay (PTP) with date and amount. Summarise next steps clearly.', step: 6 },
+  end:                  { desc: 'Close the call professionally. Confirm what was agreed and wish the borrower well.', step: 7 },
+  wrong_person:         { desc: 'Terminal — end the call if this is not the borrower or the number is incorrect.', terminal: true },
+  callback:             { desc: 'Terminal — schedule a callback at a better time if the borrower cannot speak now.', terminal: true },
+};
+
+function buildFlowStageList() {
+  const mainNodes = FLOW_NODES.filter(n => !n.terminal);
+  const termNodes = FLOW_NODES.filter(n => n.terminal);
+
+  const stageCard = n => {
+    const meta = FLOW_STAGE_META[n.id] || {};
+    const badge = n.terminal
+      ? '<span class="flow-stage-badge">Terminal</span>'
+      : '<span class="flow-stage-badge">Step ' + (meta.step || '?') + '</span>';
+    return '<div class="flow-stage' + (n.terminal ? ' terminal' : '') + '">'
+      + '<div class="flow-stage-num">' + (n.terminal ? '\u2299' : (meta.step || '')) + '</div>'
+      + '<div class="flow-stage-name">' + n.label + '</div>'
+      + '<div class="flow-stage-desc">' + (meta.desc || '') + '</div>'
+      + badge
+      + '</div>';
+  };
+
+  const edgePills = (FLOW_EDGES || []).filter(e => e.label).map(e => {
+    const fromLabel = (FLOW_NODES.find(n => n.id === e.from) || {}).label || e.from;
+    const toLabel   = (FLOW_NODES.find(n => n.id === e.to)   || {}).label || e.to;
+    return '<span class="edge-pill">' + fromLabel + ' \u2192 ' + toLabel + ' (' + e.label + ')</span>';
+  }).join('');
+
+  return '<div class="flow-stages">' + mainNodes.map(stageCard).join('') + '</div>'
+    + (termNodes.length ? '<div style="margin-top:.5rem;display:grid;grid-template-columns:1fr 1fr;gap:.5rem">' + termNodes.map(stageCard).join('') + '</div>' : '')
+    + (edgePills ? '<div class="flow-edges-note"><span style="color:var(--faint);font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Branch paths:\u00a0</span>' + edgePills + '</div>' : '');
 }
 
 function toggleConfig() {
@@ -696,9 +782,9 @@ function showLiveSession(p) {
       </div>
       <button class="btn-back" onclick="endLiveSession()">End Call</button>
     </div>
-    <div class="flow-bar" id="flow-bar-live"></div>
+    <div class="flow-graph-wrap" id="flow-graph-live"></div>
     <iframe id="client-iframe" src="/client/" allow="microphone" style="width:100%;height:560px;border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;background:var(--bg)"></iframe>`;
-  buildFlowBar('flow-bar-live');
+  buildFlowGraph('flow-graph-live', null);
   // Scroll to it
   liveArea.scrollIntoView({ behavior:'smooth' });
 }
@@ -711,41 +797,163 @@ function endLiveSession() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Flow Bar
+// Flow Graph (SVG DAG)
 // ═══════════════════════════════════════════════════════════════
-function buildFlowBar(containerId) {
-  const bar = document.getElementById(containerId);
-  if (!bar) return;
-  bar.innerHTML = '';
-  FLOW_NODES.forEach((node, i) => {
-    const step = document.createElement('div');
-    step.className = 'flow-step';
-    step.innerHTML = `<div class="flow-dot" id="fd-${node.id}">${i+1}</div><span class="flow-label" id="fl-${node.id}">${node.label}</span>`;
-    bar.appendChild(step);
-    if (i < FLOW_NODES.length - 1) {
-      const conn = document.createElement('div');
-      conn.className = 'flow-connector'; conn.id = `fc-${i}`;
-      bar.appendChild(conn);
-    }
-  });
+
+// Layout constants
+const _FG = {
+  nodeW: 80, nodeH: 28, rx: 14,
+  colGap: 110, rowGap: 52,
+  pad: 16,
+  // Column assignment for each node id (0-indexed)
+  cols: {
+    greeting: 0, overdue_info: 1, understand_situation: 2,
+    payment_options: 3, commitment: 4, promise_to_pay: 5, end: 6,
+    wrong_person: 0, callback: 3,
+  },
+  // Row assignment (0 = main, 1 = branch below)
+  rows: {
+    greeting: 0, overdue_info: 0, understand_situation: 0,
+    payment_options: 0, commitment: 0, promise_to_pay: 0, end: 0,
+    wrong_person: 1, callback: 1,
+  },
+};
+
+function _nodePos(id) {
+  const col = _FG.cols[id] ?? 0;
+  const row = _FG.rows[id] ?? 0;
+  return {
+    x: _FG.pad + col * _FG.colGap + _FG.nodeW / 2,
+    y: _FG.pad + row * _FG.rowGap + _FG.nodeH / 2,
+  };
 }
 
-function updateFlowBar(currentNode) {
-  const idx = FLOW_NODES.findIndex(n => n.id === currentNode);
-  if (idx < 0) return;
-  FLOW_NODES.forEach((node, i) => {
-    const dot = document.getElementById(`fd-${node.id}`);
-    const lbl = document.getElementById(`fl-${node.id}`);
-    const conn = document.getElementById(`fc-${i}`);
-    if (!dot) return;
-    dot.className = 'flow-dot' + (i < idx ? ' done' : i === idx ? ' active' : '');
-    if (lbl) lbl.className = 'flow-label' + (i < idx ? ' done' : i === idx ? ' active' : '');
-    if (conn) conn.classList.toggle('done', i < idx);
+function buildFlowGraph(containerId, currentNode) {
+  const wrap = document.getElementById(containerId);
+  if (!wrap) return;
+
+  const nodes = FLOW_NODES;
+  const edges = FLOW_EDGES || [];
+
+  // Compute SVG size
+  const maxCol = Math.max(...nodes.map(n => _FG.cols[n.id] ?? 0));
+  const maxRow = Math.max(...nodes.map(n => _FG.rows[n.id] ?? 0));
+  const svgW = _FG.pad * 2 + (maxCol + 1) * _FG.colGap;
+  const svgH = _FG.pad * 2 + (maxRow + 1) * _FG.rowGap;
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('width', svgW);
+  svg.setAttribute('height', svgH);
+  svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+
+  // Defs — arrowhead marker
+  const defs = document.createElementNS(NS, 'defs');
+  ['edge','edge-done','edge-active'].forEach(id => {
+    const col = id === 'edge-done' ? '#34d399' : id === 'edge-active' ? '#60a5fa' : '#374151';
+    const mk = document.createElementNS(NS, 'marker');
+    mk.setAttribute('id', id); mk.setAttribute('markerWidth','6');
+    mk.setAttribute('markerHeight','6'); mk.setAttribute('refX','5');
+    mk.setAttribute('refY','3'); mk.setAttribute('orient','auto');
+    const poly = document.createElementNS(NS, 'polygon');
+    poly.setAttribute('points','0 0,6 3,0 6'); poly.setAttribute('fill', col);
+    mk.appendChild(poly); defs.appendChild(mk);
   });
+  svg.appendChild(defs);
+
+  // Determine "done" nodes: ancestors of currentNode in the edge graph
+  const doneSet = new Set();
+  if (currentNode) {
+    const parents = {};
+    edges.forEach(e => { (parents[e.to] = parents[e.to]||[]).push(e.from); });
+    const queue = [...(parents[currentNode]||[])];
+    while (queue.length) {
+      const n = queue.shift();
+      if (!doneSet.has(n)) { doneSet.add(n); (parents[n]||[]).forEach(p=>queue.push(p)); }
+    }
+  }
+
+  // Draw edges
+  edges.forEach(e => {
+    const s = _nodePos(e.from), t = _nodePos(e.to);
+    const isDone = doneSet.has(e.from) && doneSet.has(e.to);
+    const isActive = !isDone && (e.from === currentNode || e.to === currentNode);
+    const stroke = isDone ? '#34d399' : isActive ? '#60a5fa' : '#374151';
+    const marker = isDone ? 'edge-done' : isActive ? 'edge-active' : 'edge';
+
+    // Simple elbow: go right then down (or direct)
+    let d;
+    if (s.y === t.y) {
+      d = `M${s.x+_FG.nodeW/2},${s.y} L${t.x-_FG.nodeW/2},${t.y}`;
+    } else {
+      const midX = (s.x + t.x) / 2;
+      d = `M${s.x},${s.y+_FG.nodeH/2} Q${s.x},${t.y} ${t.x-_FG.nodeW/2},${t.y}`;
+    }
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', stroke);
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('marker-end', `url(#${marker})`);
+    svg.appendChild(path);
+
+    // Edge label
+    if (e.label) {
+      const lx = (s.x + t.x) / 2, ly = (s.y + t.y) / 2 - 4;
+      const txt = document.createElementNS(NS, 'text');
+      txt.setAttribute('x', lx); txt.setAttribute('y', ly);
+      txt.setAttribute('text-anchor','middle');
+      txt.setAttribute('font-size','7'); txt.setAttribute('fill','#6b7280');
+      txt.textContent = e.label;
+      svg.appendChild(txt);
+    }
+  });
+
+  // Draw nodes
+  nodes.forEach(node => {
+    const {x, y} = _nodePos(node.id);
+    const isActive = node.id === currentNode;
+    const isDone = doneSet.has(node.id);
+    const isTerminal = node.terminal;
+
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('id', `fg-${node.id}`);
+
+    const rect = document.createElementNS(NS, 'rect');
+    rect.setAttribute('x', x - _FG.nodeW/2);
+    rect.setAttribute('y', y - _FG.nodeH/2);
+    rect.setAttribute('width', _FG.nodeW);
+    rect.setAttribute('height', _FG.nodeH);
+    rect.setAttribute('rx', _FG.rx);
+    rect.setAttribute('fill', isActive ? '#3b82f6' : isDone ? '#059669' : isTerminal ? '#374151' : '#1f2937');
+    rect.setAttribute('stroke', isActive ? '#60a5fa' : isDone ? '#34d399' : '#374151');
+    rect.setAttribute('stroke-width', isActive ? '2' : '1');
+    if (isActive) {
+      rect.setAttribute('filter', 'drop-shadow(0 0 6px rgba(59,130,246,.6))');
+    }
+    g.appendChild(rect);
+
+    const txt = document.createElementNS(NS, 'text');
+    txt.setAttribute('x', x); txt.setAttribute('y', y + 4);
+    txt.setAttribute('text-anchor','middle');
+    txt.setAttribute('font-size','9');
+    txt.setAttribute('font-weight', isActive ? '700' : '500');
+    txt.setAttribute('fill', isActive || isDone ? '#fff' : '#9ca3af');
+    txt.textContent = node.label;
+    g.appendChild(txt);
+
+    svg.appendChild(g);
+  });
+
+  wrap.innerHTML = '';
+  wrap.appendChild(svg);
+}
+
+function updateFlowGraph(currentNode) {
+  buildFlowGraph('flow-graph-live', currentNode);
 }
 
 async function pollActiveFlow() {
-  // Update active call indicator
   try {
     const data = await fetch('/api/active-flow').then(r=>r.json());
     const active = data && data.current_node;
@@ -755,7 +963,10 @@ async function pollActiveFlow() {
       if (active) { pulse.classList.add('on'); label.textContent = 'Active call'; }
       else { pulse.classList.remove('on'); label.textContent = 'No active call'; }
     }
-    if (active && currentPage === 'agent') updateFlowBar(data.current_node);
+    // Sync node/edge definitions from server (always up to date)
+    if (data.flow_nodes) FLOW_NODES = data.flow_nodes;
+    if (data.flow_edges) FLOW_EDGES = data.flow_edges;
+    if (currentPage === 'agent') updateFlowGraph(data.current_node || null);
   } catch(e) {}
 }
 
@@ -769,6 +980,7 @@ async function renderConversations(el) {
       <select id="conv-outcome" onchange="applyFilter()">
         <option value="">All outcomes</option>
         <option value="ptp" ${convFilter.outcome==='ptp'?'selected':''}>PTP</option>
+        <option value="payment_confirmed" ${convFilter.outcome==='payment_confirmed'?'selected':''}>Payment Confirmed</option>
         <option value="callback" ${convFilter.outcome==='callback'?'selected':''}>Callback</option>
         <option value="wrong_person" ${convFilter.outcome==='wrong_person'?'selected':''}>Wrong Person</option>
         <option value="incomplete" ${convFilter.outcome==='incomplete'?'selected':''}>Incomplete</option>
@@ -842,10 +1054,16 @@ async function viewTranscript(id) {
   document.getElementById('modal-meta').innerHTML = `
     <span>📋 ${fmtOutcome(data.outcome)}</span>
     <span>⏱ ${fmtDuration(data.duration_seconds)}</span>
-    <span>💰 $${(data.estimated_cost_usd||0).toFixed(4)}</span>
+    <span>💰 $${(data.estimated_cost_usd||0).toFixed(4)} est.</span>
     <span>🔧 ${data.stt_type}+${data.tts_type}+${data.llm_type}</span>
     ${data.payment_plan ? `<span>🤝 ${data.payment_plan}</span>` : ''}
-    ${data.payment_date ? `<span>📅 ${data.payment_date}</span>` : ''}`;
+    ${data.payment_date ? `<span>📅 ${data.payment_date}</span>` : ''}
+    ${data.payment_amount != null ? `<span>💵 ₹${data.payment_amount} paid</span>` : ''}
+    ${data.has_receipt === true ? `<span style="color:var(--green)">🧾 Receipt: Yes</span>` : data.has_receipt === false ? `<span style="color:var(--amber)">🧾 Receipt: No</span>` : ''}`;
+
+  // Metrics panel
+  renderMetricsPanel(data.metrics || {});
+
   const body = document.getElementById('modal-body');
   if (!data.transcript || !data.transcript.length) {
     body.innerHTML = '<p style="color:var(--muted);text-align:center">No transcript available.</p>';
@@ -853,10 +1071,98 @@ async function viewTranscript(id) {
     body.innerHTML = data.transcript.map(m => `
       <div class="msg ${m.role}">
         <div class="msg-role">${m.role === 'user' ? '👤 Borrower' : '🤖 Agent'}</div>
-        ${m.text}
+        ${esc(m.text)}
       </div>`).join('');
   }
   document.getElementById('transcript-modal').style.display = 'flex';
+}
+
+function renderMetricsPanel(m) {
+  const el = document.getElementById('modal-metrics');
+  // Hide panel entirely if no metrics data was captured
+  const hasData = m && (m.stt_ttfb_avg || m.llm_ttfb_avg || m.tts_ttfb_avg ||
+                         m.tokens_in || (m.turn_latency && m.turn_latency.length));
+  if (!hasData) { el.innerHTML = ''; return; }
+
+  const fmtMs = v => v != null ? `${(v*1000).toFixed(0)}ms` : '—';
+  const speedClass = v => !v ? 'dim' : v < 0.5 ? 'fast' : v < 1.5 ? '' : 'slow';
+
+  const avgLat = m.turn_latency && m.turn_latency.length
+    ? m.turn_latency.reduce((a,b)=>a+b,0)/m.turn_latency.length : null;
+
+  // Build latency mini bar chart
+  let latencyChart = '';
+  if (m.turn_latency && m.turn_latency.length > 1) {
+    const max = Math.max(...m.turn_latency, 0.001);
+    const bars = m.turn_latency.map((v,i) => {
+      const h = Math.max(4, Math.round(v/max*34));
+      const cls = v < 1 ? 'fast' : v < 2.5 ? 'med' : 'slow';
+      return `<div class="l-bar ${cls}" style="height:${h}px" title="Turn ${i+1}: ${v.toFixed(2)}s"></div>`;
+    }).join('');
+    latencyChart = `<div class="latency-row">
+      <div class="latency-title">Turn latency (user → agent response)</div>
+      <div class="latency-bars">${bars}</div>
+    </div>`;
+  }
+
+  el.innerHTML = `
+    <div class="metrics-panel">
+      <button class="metrics-toggle" id="mtoggle" onclick="toggleMetrics()">
+        <span>Performance Metrics (real pipecat data)</span>
+        <span class="arr">▼</span>
+      </button>
+      <div class="metrics-grid" id="metrics-grid">
+        <div class="m-card">
+          <div class="m-val ${speedClass(m.stt_ttfb_avg)}">${fmtMs(m.stt_ttfb_avg)}</div>
+          <div class="m-label">STT TTFB</div>
+          <div class="m-sub">speech → text</div>
+        </div>
+        <div class="m-card">
+          <div class="m-val ${speedClass(m.llm_ttfb_avg)}">${fmtMs(m.llm_ttfb_avg)}</div>
+          <div class="m-label">LLM TTFB</div>
+          <div class="m-sub">first token out</div>
+        </div>
+        <div class="m-card">
+          <div class="m-val ${speedClass(m.tts_ttfb_avg)}">${fmtMs(m.tts_ttfb_avg)}</div>
+          <div class="m-label">TTS TTFB</div>
+          <div class="m-sub">first audio byte</div>
+        </div>
+        <div class="m-card">
+          <div class="m-val ${avgLat != null ? speedClass(avgLat) : 'dim'}">${avgLat != null ? avgLat.toFixed(2)+'s' : '—'}</div>
+          <div class="m-label">Avg Turn Latency</div>
+          <div class="m-sub">${m.turn_latency ? m.turn_latency.length+' turns' : ''}</div>
+        </div>
+        <div class="m-card">
+          <div class="m-val">${(m.tokens_in||0).toLocaleString()}</div>
+          <div class="m-label">Tokens In</div>
+          <div class="m-sub">${m.llm_calls||0} LLM call${(m.llm_calls||0)!==1?'s':''}</div>
+        </div>
+        <div class="m-card">
+          <div class="m-val">${(m.tokens_out||0).toLocaleString()}</div>
+          <div class="m-label">Tokens Out</div>
+          <div class="m-sub">completion</div>
+        </div>
+        <div class="m-card">
+          <div class="m-val">${((m.tokens_in||0)+(m.tokens_out||0)).toLocaleString()}</div>
+          <div class="m-label">Total Tokens</div>
+          <div class="m-sub">vs est. cost</div>
+        </div>
+        <div class="m-card">
+          <div class="m-val">${(m.tts_chars||0).toLocaleString()}</div>
+          <div class="m-label">TTS Chars</div>
+          <div class="m-sub">synthesized</div>
+        </div>
+        ${latencyChart ? `<div style="grid-column:1/-1">${latencyChart}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function toggleMetrics() {
+  const btn = document.getElementById('mtoggle');
+  const grid = document.getElementById('metrics-grid');
+  if (!btn || !grid) return;
+  const open = btn.classList.toggle('open');
+  grid.classList.toggle('visible', open);
 }
 
 function closeModal(e) {
@@ -879,7 +1185,10 @@ async function renderAnalytics(el) {
   const totalOut = Object.values(ob).reduce((a,b)=>a+b,0) || 1;
   const totalPip = Object.values(pb).reduce((a,b)=>a+b,0) || 1;
 
-  const outColors = { ptp:'green', callback:'amber', wrong_person:'red', incomplete:'blue', unknown:'accent' };
+  const outColors = { ptp:'green', payment_confirmed:'green', callback:'amber', wrong_person:'red', incomplete:'blue', unknown:'accent' };
+
+  const receiptTotal = (stats.receipt_confirmed||0) + (stats.receipt_denied||0);
+  const receiptRate = receiptTotal ? Math.round((stats.receipt_confirmed||0)/receiptTotal*100) : 0;
 
   el.innerHTML = `
     <div class="analytics-grid">
@@ -921,6 +1230,28 @@ async function renderAnalytics(el) {
           <tr><td style="color:var(--muted);padding:.3rem 0">Active now</td><td style="text-align:right;font-weight:600;color:${stats.active_now?'var(--green)':'var(--faint)'}">${stats.active_now}</td></tr>
         </table>
       </div>
+      <div class="analytics-card" style="grid-column:1/-1">
+        <h4>Payment Recovery</h4>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem">
+          <div style="text-align:center">
+            <div style="font-size:1.6rem;font-weight:700;color:var(--green)">${stats.ptp_count||0}</div>
+            <div style="font-size:.68rem;color:var(--muted);margin-top:.25rem">Promise to Pay</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:1.6rem;font-weight:700;color:var(--green)">${stats.payment_confirmed_count||0}</div>
+            <div style="font-size:.68rem;color:var(--muted);margin-top:.25rem">Already Paid (confirmed)</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:1.6rem;font-weight:700;color:var(--amber)">₹${(stats.total_payment_amount||0).toLocaleString('en-IN')}</div>
+            <div style="font-size:.68rem;color:var(--muted);margin-top:.25rem">Total Amount Recovered</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:1.6rem;font-weight:700;color:${receiptRate>50?'var(--green)':'var(--amber)'}">${receiptRate}%</div>
+            <div style="font-size:.68rem;color:var(--muted);margin-top:.25rem">Receipt Confirmation Rate</div>
+            <div style="font-size:.62rem;color:var(--faint);margin-top:.1rem">${stats.receipt_confirmed||0} yes / ${stats.receipt_denied||0} no</div>
+          </div>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -930,10 +1261,14 @@ async function renderAnalytics(el) {
 async function renderSettings(el) {
   const cs = await api('/api/config-status') || {};
   const keys = [
-    { key:'deepgram',   label:'Deepgram API Key',   env:'DEEPGRAM_API_KEY',   ok: cs.deepgram },
-    { key:'openai',     label:'OpenAI API Key',      env:'OPENAI_API_KEY',     ok: cs.openai },
-    { key:'sarvam',     label:'Sarvam AI Key',       env:'SARVAM_API_KEY',     ok: cs.sarvam },
-    { key:'ollama',     label:'Groq / Ollama Key',   env:'GROQ_API_KEY / OLLAMA_BASE_URL', ok: cs.ollama_or_groq },
+    { key:'deepgram',   label:'Deepgram API Key',       env:'DEEPGRAM_API_KEY',                    ok: cs.deepgram },
+    { key:'openai',     label:'OpenAI API Key',          env:'OPENAI_API_KEY',                      ok: cs.openai },
+    { key:'sarvam',     label:'Sarvam AI Key',           env:'SARVAM_API_KEY',                      ok: cs.sarvam },
+    { key:'ollama',     label:'Groq / Ollama Key',       env:'GROQ_API_KEY / OLLAMA_BASE_URL',      ok: cs.ollama_or_groq },
+    { key:'twilio',     label:'Twilio (Outbound)',       env:'TWILIO_ACCOUNT_SID + AUTH_TOKEN',     ok: cs.twilio },
+    { key:'exotel',     label:'Exotel (Outbound)',       env:'EXOTEL_API_KEY + API_TOKEN',          ok: cs.exotel },
+    { key:'whatsapp',   label:'WhatsApp Business',       env:'WHATSAPP_TOKEN + PHONE_NUMBER_ID',    ok: cs.whatsapp },
+    { key:'inya',       label:'inya.ai Webhook',         env:'INYA_WEBHOOK_SECRET',                 ok: cs.inya },
   ];
   el.innerHTML = `
     <div class="settings-section">
@@ -1302,7 +1637,7 @@ function fmtDate(iso) {
 }
 
 function fmtOutcome(o) {
-  return { ptp:'PTP', callback:'Callback', wrong_person:'Wrong Person', incomplete:'Incomplete' }[o] || o || 'Unknown';
+  return { ptp:'PTP', callback:'Callback', wrong_person:'Wrong Person', incomplete:'Incomplete', payment_confirmed:'Paid ✓' }[o] || o || 'Unknown';
 }
 </script>
 </body>

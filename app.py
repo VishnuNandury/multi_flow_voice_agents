@@ -16,6 +16,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+import aiohttp
+
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,6 +57,8 @@ from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCRequest,
     SmallWebRTCRequestHandler,
 )
+from pipecat.transports.whatsapp.client import WhatsAppClient
+from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
 
 
 def _parse_turn_urls(raw: str) -> List[str]:
@@ -179,9 +183,30 @@ class LoginRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _whatsapp_client, _aiohttp_session
+
     init_db()
+
+    # Shared aiohttp session (used by WhatsApp client + dialer)
+    _aiohttp_session = aiohttp.ClientSession()
+
+    # WhatsApp Business Calling (optional — only if credentials are set)
+    if _WA_TOKEN and _WA_PHONE_NUMBER_ID:
+        _whatsapp_client = WhatsAppClient(
+            whatsapp_token=_WA_TOKEN,
+            phone_number_id=_WA_PHONE_NUMBER_ID,
+            session=_aiohttp_session,
+            ice_servers=ICE_SERVERS,
+            whatsapp_secret=_WA_APP_SECRET or None,
+        )
+        logger.info(f"WhatsApp Business Calling ready (phone_number_id={_WA_PHONE_NUMBER_ID})")
+    else:
+        logger.info("WhatsApp Business Calling not configured (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID not set)")
+
     yield
+
     await small_webrtc_handler.close()
+    await _aiohttp_session.close()
 
 
 app = FastAPI(title="Multi-Pipeline Voice Agent", lifespan=lifespan)
@@ -266,10 +291,20 @@ async def get_stats(
     total = db.query(func.count(Conversation.id)).scalar() or 0
     completed = db.query(func.count(Conversation.id)).filter(Conversation.outcome.isnot(None)).scalar() or 0
     ptp_count = db.query(func.count(Conversation.id)).filter(Conversation.outcome == "ptp").scalar() or 0
+    payment_confirmed_count = db.query(func.count(Conversation.id)).filter(Conversation.outcome == "payment_confirmed").scalar() or 0
     avg_dur = db.query(func.avg(Conversation.duration_seconds)).filter(
         Conversation.duration_seconds.isnot(None)
     ).scalar() or 0
     total_cost = db.query(func.sum(Conversation.estimated_cost_usd)).scalar() or 0
+    total_payment_amount = db.query(func.sum(Conversation.payment_amount)).filter(
+        Conversation.payment_amount.isnot(None)
+    ).scalar() or 0
+    receipt_confirmed = db.query(func.count(Conversation.id)).filter(
+        Conversation.has_receipt == True
+    ).scalar() or 0
+    receipt_denied = db.query(func.count(Conversation.id)).filter(
+        Conversation.has_receipt == False
+    ).scalar() or 0
 
     # Outcome breakdown
     outcome_rows = db.query(
@@ -302,6 +337,10 @@ async def get_stats(
         "completed": completed,
         "ptp_count": ptp_count,
         "ptp_rate": round(ptp_count / completed, 3) if completed else 0,
+        "payment_confirmed_count": payment_confirmed_count,
+        "total_payment_amount": round(total_payment_amount, 2),
+        "receipt_confirmed": receipt_confirmed,
+        "receipt_denied": receipt_denied,
         "avg_duration_seconds": round(avg_dur, 1),
         "total_cost_usd": round(total_cost, 4),
         "active_now": len(bot_module.session_data),
@@ -363,6 +402,7 @@ async def get_conversation(
     if not c:
         raise HTTPException(status_code=404, detail="Conversation not found")
     transcript = json.loads(c.transcript_json) if c.transcript_json else []
+    metrics = json.loads(c.metrics_json) if c.metrics_json else {}
     return {
         "id": c.id,
         "pc_id": c.pc_id,
@@ -377,11 +417,14 @@ async def get_conversation(
         "outcome": c.outcome,
         "payment_plan": c.payment_plan,
         "payment_date": c.payment_date,
+        "payment_amount": c.payment_amount,
+        "has_receipt": c.has_receipt,
         "duration_seconds": c.duration_seconds,
         "estimated_cost_usd": c.estimated_cost_usd,
         "started_at": c.started_at.isoformat() if c.started_at else None,
         "ended_at": c.ended_at.isoformat() if c.ended_at else None,
         "transcript": transcript,
+        "metrics": metrics,
     }
 
 
@@ -412,6 +455,7 @@ async def config_status():
         "inya": bool(os.getenv("INYA_WEBHOOK_SECRET")),
         "twilio": bool(os.getenv("TWILIO_ACCOUNT_SID") and os.getenv("TWILIO_AUTH_TOKEN")),
         "exotel": bool(os.getenv("EXOTEL_API_KEY") and os.getenv("EXOTEL_API_TOKEN")),
+        "whatsapp": bool(os.getenv("WHATSAPP_TOKEN") and os.getenv("WHATSAPP_PHONE_NUMBER_ID")),
     }
 
 
@@ -424,6 +468,19 @@ _campaign_events: Dict[int, asyncio.Event] = {}   # call_id → done event
 _running_campaigns: Dict[int, asyncio.Task] = {}
 
 _PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
+
+# ---------------------------------------------------------------------------
+# WhatsApp Business Calling configuration
+# ---------------------------------------------------------------------------
+
+_WA_TOKEN = os.getenv("WHATSAPP_TOKEN", "")
+_WA_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+_WA_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET", "")
+_WA_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
+
+# Initialized in lifespan after aiohttp session is ready
+_whatsapp_client: Optional[WhatsAppClient] = None
+_aiohttp_session: Optional[aiohttp.ClientSession] = None
 
 
 async def _campaign_runner(campaign_id: int):
@@ -974,6 +1031,69 @@ async def telephony_ws(websocket: WebSocket, call_id: int):
     )
 
 
+# ---------------------------------------------------------------------------
+# WhatsApp Business Calling API webhooks (NO JWT — Meta calls these)
+# ---------------------------------------------------------------------------
+
+@app.get("/whatsapp")
+async def whatsapp_verify(request: Request):
+    """
+    Meta sends a GET to verify the webhook when you first configure it.
+    Set WHATSAPP_VERIFY_TOKEN in your env and paste the same token into the
+    Meta for Developers → WhatsApp → Configuration → Verify Token field.
+    """
+    if not _WA_VERIFY_TOKEN or not _whatsapp_client:
+        raise HTTPException(status_code=503, detail="WhatsApp not configured (WHATSAPP_TOKEN / WHATSAPP_VERIFY_TOKEN missing)")
+    try:
+        challenge = await _whatsapp_client.handle_verify_webhook_request(
+            params=dict(request.query_params),
+            expected_verification_token=_WA_VERIFY_TOKEN,
+        )
+        return Response(content=str(challenge), media_type="text/plain")
+    except ValueError as e:
+        logger.warning(f"WhatsApp webhook verification failed: {e}")
+        raise HTTPException(status_code=403, detail=str(e))
+
+
+@app.post("/whatsapp")
+async def whatsapp_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body: WhatsAppWebhookRequest,
+):
+    """
+    Meta sends call CONNECT / TERMINATE events here.
+    On CONNECT: establish a SmallWebRTC connection and run the bot.
+    Pipeline defaults to deepgram + openai (can be overridden via _next_pipeline).
+    """
+    if not _whatsapp_client:
+        raise HTTPException(status_code=503, detail="WhatsApp client not configured")
+
+    raw_body = await request.body()
+    signature = request.headers.get("X-Hub-Signature-256", "")
+
+    stt = _next_pipeline.get("pipeline_stt", "deepgram")
+    tts = _next_pipeline.get("pipeline_tts", "openai")
+    llm = _next_pipeline.get("pipeline_llm", "openai")
+    agent_config = _next_pipeline.get("agent_config", {})
+
+    async def whatsapp_connection_callback(connection: SmallWebRTCConnection):
+        logger.info(f"WhatsApp WebRTC connection established (STT={stt}, TTS={tts}, LLM={llm})")
+        background_tasks.add_task(bot_module.run_bot, connection, stt, tts, llm, agent_config)
+
+    try:
+        ok = await _whatsapp_client.handle_webhook_request(
+            request=body,
+            connection_callback=whatsapp_connection_callback,
+            raw_body=raw_body,
+            sha256_signature=signature,
+        )
+        return {"status": "ok" if ok else "ignored"}
+    except Exception as e:
+        logger.error(f"WhatsApp webhook error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="WhatsApp webhook handling failed")
+
+
 # inya.ai webhook endpoints
 # ---------------------------------------------------------------------------
 # inya agents call GET /api/inya/borrower at call start to fetch borrower data,
@@ -1235,19 +1355,25 @@ async def get_active_flow():
         return {
             "current_node": data.get("current_node"),
             "flow_nodes": bot_module.FLOW_NODES,
+            "flow_edges": bot_module.FLOW_EDGES,
             "transcript": data.get("transcript", []),
             "stt_type": data.get("stt_type"),
             "tts_type": data.get("tts_type"),
             "llm_type": data.get("llm_type"),
             "duration": time.time() - data.get("start_time", time.time()),
         }
-    return {"current_node": None, "flow_nodes": bot_module.FLOW_NODES, "transcript": []}
+    return {
+        "current_node": None,
+        "flow_nodes": bot_module.FLOW_NODES,
+        "flow_edges": bot_module.FLOW_EDGES,
+        "transcript": [],
+    }
 
 
 @app.get("/api/flow-nodes")
 async def get_flow_nodes():
-    """Return the list of flow node definitions."""
-    return bot_module.FLOW_NODES
+    """Return the list of flow node definitions and edges."""
+    return {"nodes": bot_module.FLOW_NODES, "edges": bot_module.FLOW_EDGES}
 
 
 # ---------------------------------------------------------------------------

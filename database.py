@@ -77,9 +77,11 @@ class Conversation(Base):
 
     # Call lifecycle
     status = Column(String(20), default="active")    # active | completed | dropped
-    outcome = Column(String(30), nullable=True)       # ptp | callback | wrong_person | incomplete
+    outcome = Column(String(30), nullable=True)       # ptp | callback | wrong_person | incomplete | payment_confirmed
     payment_plan = Column(String(200), nullable=True)
     payment_date = Column(String(50), nullable=True)
+    payment_amount = Column(Float, nullable=True)     # actual amount paid (if borrower already paid)
+    has_receipt = Column(Boolean, nullable=True)      # whether borrower has payment receipt
 
     started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     ended_at = Column(DateTime, nullable=True)
@@ -87,6 +89,9 @@ class Conversation(Base):
 
     # Full transcript stored as JSON text
     transcript_json = Column(Text, nullable=True)
+
+    # Pipecat metrics summary: TTFB, token usage, turn latency, etc.
+    metrics_json = Column(Text, nullable=True)
 
     # Estimated cost in USD
     estimated_cost_usd = Column(Float, default=0.0)
@@ -293,10 +298,13 @@ def save_conversation_sync(pc_id: str, data: dict):
             outcome=data.get("outcome"),
             payment_plan=data.get("payment_plan"),
             payment_date=data.get("payment_date"),
+            payment_amount=data.get("payment_amount"),
+            has_receipt=data.get("has_receipt"),
             started_at=datetime.fromtimestamp(start_time, tz=timezone.utc) if start_time else None,
             ended_at=datetime.fromtimestamp(end_time, tz=timezone.utc),
             duration_seconds=duration,
             transcript_json=json.dumps(transcript, ensure_ascii=False),
+            metrics_json=json.dumps(data.get("metrics_summary") or {}, ensure_ascii=False),
             estimated_cost_usd=cost,
         )
         db.add(conv)

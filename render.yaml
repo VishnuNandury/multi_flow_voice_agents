@@ -70,6 +70,16 @@ services:
       - key: EXOTEL_PHONE_NUMBER
         sync: false
 
+      # --- WhatsApp Business Calling API ---
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+
       # --- TURN Server ---
       - key: TURN_URL
         sync: false

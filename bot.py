@@ -31,7 +31,18 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     LLMFullResponseStartFrame,
     LLMFullResponseEndFrame,
+    MetricsFrame,
+    BotStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import (
+    TTFBMetricsData,
+    ProcessingMetricsData,
+    LLMUsageMetricsData,
+    TTSUsageMetricsData,
+)
+from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -152,13 +163,28 @@ def _make_borrower_info(cfg: dict) -> str:
 # ---------------------------------------------------------------------------
 
 FLOW_NODES = [
-    {"id": "greeting", "label": "Greeting"},
-    {"id": "overdue_info", "label": "Overdue Info"},
-    {"id": "understand_situation", "label": "Situation"},
-    {"id": "payment_options", "label": "Options"},
-    {"id": "commitment", "label": "Commitment"},
-    {"id": "promise_to_pay", "label": "PTP"},
-    {"id": "end", "label": "Complete"},
+    {"id": "greeting",            "label": "Greeting"},
+    {"id": "overdue_info",        "label": "Overdue Info"},
+    {"id": "understand_situation","label": "Situation"},
+    {"id": "payment_options",     "label": "Options"},
+    {"id": "commitment",          "label": "Commitment"},
+    {"id": "promise_to_pay",      "label": "PTP"},
+    {"id": "end",                 "label": "Complete"},
+    # Terminal nodes (reached via short-circuit paths)
+    {"id": "wrong_person",        "label": "Wrong Person", "terminal": True},
+    {"id": "callback",            "label": "Callback",     "terminal": True},
+]
+
+# Directed edges: which nodes can follow which (for graph viz)
+FLOW_EDGES = [
+    {"from": "greeting",            "to": "overdue_info",        "label": "confirmed"},
+    {"from": "greeting",            "to": "wrong_person",        "label": "wrong person"},
+    {"from": "overdue_info",        "to": "understand_situation","label": ""},
+    {"from": "understand_situation","to": "payment_options",     "label": ""},
+    {"from": "payment_options",     "to": "commitment",          "label": "agreed"},
+    {"from": "payment_options",     "to": "callback",            "label": "callback"},
+    {"from": "commitment",          "to": "promise_to_pay",      "label": ""},
+    {"from": "promise_to_pay",      "to": "end",                 "label": ""},
 ]
 
 # pc_id -> {current_node, start_time, stt_type, tts_type, llm_type, transcript}
@@ -221,6 +247,132 @@ class AssistantTranscriptCapture(FrameProcessor):
             self._buffer = ""
             self._capturing = False
         await self.push_frame(frame, direction)
+
+
+# ---------------------------------------------------------------------------
+# Metrics Observer — captures real pipecat metrics into session_data
+# ---------------------------------------------------------------------------
+
+class SessionMetricsObserver(BaseObserver):
+    """
+    Lightweight observer that captures MetricsFrame data and turn latency
+    into session_data for later persistence to DB and display in the UI.
+
+    Performance design:
+    - on_push_frame is called for every frame; we short-circuit immediately
+      if the frame is not a MetricsFrame or a VAD/Bot speaking frame.
+    - All writes are simple list appends (no I/O, no locks needed — each
+      session runs in a single asyncio task).
+    - Lists are capped at _MAX to prevent unbounded growth on long calls.
+    """
+
+    _MAX = 200  # max entries per list
+
+    def __init__(self, pc_id: str):
+        super().__init__()
+        self._pc_id = pc_id
+        self._seen_ids: set = set()
+        self._user_stopped_at: float = 0.0
+
+    async def on_push_frame(self, data: FramePushed):
+        frame = data.frame
+
+        if isinstance(frame, MetricsFrame):
+            # Deduplicate: same MetricsFrame can be pushed across multiple processor pairs
+            fid = frame.id
+            if fid in self._seen_ids:
+                return
+            self._seen_ids.add(fid)
+            self._handle_metrics(frame)
+
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._user_stopped_at = time.monotonic()
+
+        elif isinstance(frame, BotStartedSpeakingFrame) and self._user_stopped_at:
+            latency = round(time.monotonic() - self._user_stopped_at, 3)
+            self._user_stopped_at = 0.0
+            self._append("turn_latency", latency)
+
+    def _m(self) -> dict:
+        """Get (or create) the metrics sub-dict in session_data."""
+        sd = session_data.get(self._pc_id)
+        if sd is None:
+            return {}
+        return sd.setdefault("metrics", {
+            "ttfb": [], "processing": [], "llm_tokens": [],
+            "tts_chars": [], "turn_latency": [],
+        })
+
+    def _append(self, key: str, value):
+        m = self._m()
+        if m and len(m.get(key, [])) < self._MAX:
+            m[key].append(value)
+
+    def _handle_metrics(self, frame: MetricsFrame):
+        m = self._m()
+        if not m:
+            return
+        for item in frame.data:
+            if isinstance(item, TTFBMetricsData):
+                if len(m["ttfb"]) < self._MAX:
+                    m["ttfb"].append({
+                        "p": item.processor,
+                        "model": item.model,
+                        "v": round(item.value, 4),
+                    })
+            elif isinstance(item, ProcessingMetricsData):
+                if len(m["processing"]) < self._MAX:
+                    m["processing"].append({
+                        "p": item.processor,
+                        "v": round(item.value, 4),
+                    })
+            elif isinstance(item, LLMUsageMetricsData):
+                if len(m["llm_tokens"]) < self._MAX:
+                    tok = item.value
+                    m["llm_tokens"].append({
+                        "p": item.processor,
+                        "model": item.model,
+                        "in": tok.prompt_tokens,
+                        "out": tok.completion_tokens,
+                    })
+            elif isinstance(item, TTSUsageMetricsData):
+                if len(m["tts_chars"]) < self._MAX:
+                    m["tts_chars"].append({
+                        "p": item.processor,
+                        "chars": item.value,
+                    })
+
+
+def _summarize_metrics(raw: dict) -> dict:
+    """
+    Compress raw per-event metrics into a small summary dict for DB storage.
+    Keeps per-turn latency array (useful for chart), aggregates the rest.
+    """
+    def avg(lst, key):
+        vals = [x[key] for x in lst if key in x]
+        return round(sum(vals) / len(vals), 4) if vals else None
+
+    def by_type(lst, keyword):
+        return [x for x in lst if keyword.lower() in x.get("p", "").lower()]
+
+    ttfb = raw.get("ttfb", [])
+    llm_tokens = raw.get("llm_tokens", [])
+    tts = raw.get("tts_chars", [])
+
+    return {
+        # Per-processor TTFB averages
+        "stt_ttfb_avg": avg(by_type(ttfb, "STT") or by_type(ttfb, "Deepgram") or by_type(ttfb, "Sarvam") or by_type(ttfb, "Whisper"), "v"),
+        "llm_ttfb_avg": avg(by_type(ttfb, "LLM") or by_type(ttfb, "OpenAI") or by_type(ttfb, "Ollama") or by_type(ttfb, "Groq"), "v"),
+        "tts_ttfb_avg": avg(by_type(ttfb, "TTS"), "v"),
+        # Token usage totals
+        "tokens_in":  sum(x.get("in", 0) for x in llm_tokens),
+        "tokens_out": sum(x.get("out", 0) for x in llm_tokens),
+        "llm_calls":  len(llm_tokens),
+        # TTS characters
+        "tts_chars":  sum(x.get("chars", 0) for x in tts),
+        # Turn latency — keep raw array for bar chart (small: 1 float per turn)
+        "turn_latency": raw.get("turn_latency", []),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -604,11 +756,16 @@ def create_callback_end_node(cfg: dict) -> NodeConfig:
 def create_stt(stt_type: str):
     """Create STT service based on type."""
     if stt_type == "sarvam":
-        logger.info("STT: Sarvam saarika:v2.5 (Hindi)")
+        logger.info("STT: Sarvam saarika:v2.5 (Hindi, high VAD sensitivity)")
         return SarvamSTTService(
             api_key=os.getenv("SARVAM_API_KEY", ""),
             model="saarika:v2.5",
-            params=SarvamSTTService.InputParams(language=Language.HI_IN),
+            params=SarvamSTTService.InputParams(
+                language=Language.HI_IN,
+                # Server-side VAD — Sarvam handles endpointing, no local flush needed
+                vad_signals=True,
+                high_vad_sensitivity=True,
+            ),
         )
     elif stt_type == "whisper":
         logger.info("STT: OpenAI Whisper (gpt-4o-transcribe)")
@@ -619,16 +776,25 @@ def create_stt(stt_type: str):
             prompt="Hindi and English (Hinglish) phone conversation about loan collection.",
         )
     else:
-        logger.info("STT: Deepgram Nova-3 (Hindi)")
+        logger.info("STT: Deepgram Nova-3 (Hindi, low-latency config)")
         return DeepgramSTTService(
             api_key=os.getenv("DEEPGRAM_API_KEY"),
             live_options=LiveOptions(
                 language="hi",
                 model="nova-3",
                 smart_format=True,
+                punctuate=True,
                 encoding="linear16",
                 sample_rate=16000,
                 channels=1,
+                # Latency tuning: send interim results so LLM doesn't wait for final
+                interim_results=True,
+                # VAD events let Deepgram signal speech start/end natively
+                vad_events=True,
+                # Endpointing: ms of silence before finalising utterance (lower = faster)
+                endpointing=300,
+                # If no speech detected for 1s after utterance, force final transcript
+                utterance_end_ms="1000",
             ),
         )
 
@@ -767,6 +933,11 @@ async def run_bot(
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        observers=[
+            MetricsLogObserver(),               # Logs to console for debugging
+            SessionMetricsObserver(pc_id),      # Captures to session_data for UI/DB
+        ],
+        idle_timeout_secs=300,
     )
 
     # --- Flow Manager ---
@@ -788,7 +959,13 @@ async def run_bot(
         "outcome": None,
         "payment_plan": None,
         "payment_date": None,
+        "payment_amount": None,
+        "has_receipt": None,
         "agent_config": cfg,
+        "metrics": {
+            "ttfb": [], "processing": [], "llm_tokens": [],
+            "tts_chars": [], "turn_latency": [],
+        },
     }
 
     # --- Event handlers ---
@@ -803,10 +980,12 @@ async def run_bot(
         logger.info(f"Client disconnected ({stt_type}+{tts_type}+{llm_type})")
         data = dict(session_data.pop(pc_id, {}))
         if data:
-            # Mark incomplete if no explicit outcome was set
             if not data.get("outcome"):
                 data["outcome"] = "incomplete"
             data["end_time"] = time.time()
+            # Summarize raw metrics before saving (keeps DB row small)
+            raw_metrics = data.pop("metrics", {})
+            data["metrics_summary"] = _summarize_metrics(raw_metrics)
             asyncio.create_task(_save_conversation_to_db(pc_id, data))
         await task.queue_frames([EndFrame()])
 
