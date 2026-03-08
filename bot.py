@@ -816,8 +816,8 @@ def create_tts(tts_type: str, aiohttp_session=None):
             params=SarvamHttpTTSService.InputParams(
                 language=Language.HI,
                 pitch=0.0,
-                pace=1.1,
-                loudness=1.0,
+                pace=0.85,
+                loudness=1.2,
             ),
         )
     elif tts_type == "edge":
@@ -901,7 +901,14 @@ async def run_bot(
 
     # --- Services ---
     stt = create_stt(stt_type)
-    tts = create_tts(tts_type, aiohttp_session=aiohttp_session)
+    # Sarvam HTTP TTS needs its own session with force_close=True to avoid
+    # "Server disconnected" errors caused by the shared session reusing stale connections.
+    import aiohttp as _aiohttp
+    _sarvam_session = (
+        _aiohttp.ClientSession(connector=_aiohttp.TCPConnector(force_close=True))
+        if tts_type == "sarvam" else aiohttp_session
+    )
+    tts = create_tts(tts_type, aiohttp_session=_sarvam_session)
     llm = create_llm(llm_type)
 
     # --- Context (empty — FlowManager populates it per node) ---
@@ -988,6 +995,8 @@ async def run_bot(
             raw_metrics = data.pop("metrics", {})
             data["metrics_summary"] = _summarize_metrics(raw_metrics)
             asyncio.create_task(_save_conversation_to_db(pc_id, data))
+        if tts_type == "sarvam" and not _sarvam_session.closed:
+            await _sarvam_session.close()
         await task.queue_frames([EndFrame()])
 
     # --- Run ---
