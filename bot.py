@@ -802,9 +802,12 @@ def create_stt(stt_type: str):
 def create_tts(tts_type: str, aiohttp_session=None):
     """Create TTS service based on type."""
     if tts_type == "sarvam":
-        sarvam_model = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
+        sarvam_model = os.getenv("SARVAM_TTS_MODEL", "bulbul:v2")
         sarvam_voice = os.getenv("SARVAM_TTS_VOICE", "priya").lower()
         logger.info(f"TTS: Sarvam HTTP {sarvam_model} ({sarvam_voice})")
+        # bulbul:v2 uses pitch/pace/loudness; bulbul:v3 uses temperature.
+        # SarvamHttpTTSService in pipecat 0.0.101 always sends pitch/pace/loudness
+        # in run_tts(), so we must use v2 to avoid a KeyError on 'pitch'.
         return SarvamHttpTTSService(
             api_key=os.getenv("SARVAM_API_KEY", ""),
             aiohttp_session=aiohttp_session,
@@ -812,7 +815,9 @@ def create_tts(tts_type: str, aiohttp_session=None):
             voice_id=sarvam_voice,
             params=SarvamHttpTTSService.InputParams(
                 language=Language.HI,
-                temperature=0.65,
+                pitch=0.0,
+                pace=1.1,
+                loudness=1.0,
             ),
         )
     elif tts_type == "edge":
