@@ -803,7 +803,7 @@ def create_tts(tts_type: str, aiohttp_session=None):
     """Create TTS service based on type."""
     if tts_type == "sarvam":
         sarvam_model = os.getenv("SARVAM_TTS_MODEL", "bulbul:v2")
-        sarvam_voice = os.getenv("SARVAM_TTS_VOICE", "priya").lower()
+        sarvam_voice = os.getenv("SARVAM_TTS_VOICE", "anushka").lower()
         logger.info(f"TTS: Sarvam HTTP {sarvam_model} ({sarvam_voice})")
         # bulbul:v2 uses pitch/pace/loudness; bulbul:v3 uses temperature.
         # SarvamHttpTTSService in pipecat 0.0.101 always sends pitch/pace/loudness
