@@ -10,6 +10,7 @@
 #
 
 import asyncio
+import base64
 import os
 import sys
 import time
@@ -26,6 +27,7 @@ from deepgram import LiveOptions
 
 from pipecat.frames.frames import (
     EndFrame,
+    ErrorFrame,
     Frame,
     TextFrame,
     TranscriptionFrame,
@@ -34,6 +36,9 @@ from pipecat.frames.frames import (
     MetricsFrame,
     BotStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
 )
 from pipecat.metrics.metrics import (
     TTFBMetricsData,
@@ -799,25 +804,70 @@ def create_stt(stt_type: str):
         )
 
 
+class _SarvamV3TTSService(SarvamHttpTTSService):
+    """Workaround for pipecat 0.0.101 bug: SarvamHttpTTSService.run_tts()
+    always sends pitch/pace/loudness in the payload even for bulbul:v3, which
+    only accepts temperature. This subclass overrides run_tts with the correct
+    v3 payload so we can use bulbul:v3 + priya voice."""
+
+    async def run_tts(self, text: str):
+        from pipecat.services.sarvam._sdk import sdk_headers
+        logger.debug(f"{self}: Generating TTS [{text}]")
+        try:
+            await self.start_ttfb_metrics()
+            payload = {
+                "text": text,
+                "target_language_code": self._settings["language"],
+                "speaker": self._voice_id,
+                "temperature": self._settings.get("temperature", 0.6),
+                "sample_rate": self.sample_rate,
+                "enable_preprocessing": self._settings["enable_preprocessing"],
+                "model": self._model_name,
+            }
+            headers = {
+                "api-subscription-key": self._api_key,
+                "Content-Type": "application/json",
+                **sdk_headers(),
+            }
+            yield TTSStartedFrame()
+            async with self._session.post(
+                f"{self._base_url}/text-to-speech", json=payload, headers=headers
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    yield ErrorFrame(error=f"Sarvam API error: {error_text}")
+                    return
+                response_data = await response.json()
+            await self.start_tts_usage_metrics(text)
+            audios = response_data.get("audios", [])
+            if not audios:
+                yield ErrorFrame(error="No audio data received from Sarvam")
+                return
+            audio_data = base64.b64decode(audios[0])
+            if audio_data.startswith(b"RIFF"):
+                audio_data = audio_data[44:]
+            yield TTSAudioRawFrame(audio=audio_data, sample_rate=self.sample_rate, num_channels=1)
+        except Exception as e:
+            yield ErrorFrame(error=f"Error generating TTS: {e}", exception=e)
+        finally:
+            await self.stop_ttfb_metrics()
+            yield TTSStoppedFrame()
+
+
 def create_tts(tts_type: str, aiohttp_session=None):
     """Create TTS service based on type."""
     if tts_type == "sarvam":
-        sarvam_model = os.getenv("SARVAM_TTS_MODEL", "bulbul:v2")
-        sarvam_voice = os.getenv("SARVAM_TTS_VOICE", "anushka").lower()
-        logger.info(f"TTS: Sarvam HTTP {sarvam_model} ({sarvam_voice})")
-        # bulbul:v2 uses pitch/pace/loudness; bulbul:v3 uses temperature.
-        # SarvamHttpTTSService in pipecat 0.0.101 always sends pitch/pace/loudness
-        # in run_tts(), so we must use v2 to avoid a KeyError on 'pitch'.
-        return SarvamHttpTTSService(
+        sarvam_model = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
+        sarvam_voice = os.getenv("SARVAM_TTS_VOICE", "priya").lower()
+        logger.info(f"TTS: Sarvam {sarvam_model} ({sarvam_voice})")
+        return _SarvamV3TTSService(
             api_key=os.getenv("SARVAM_API_KEY", ""),
             aiohttp_session=aiohttp_session,
             model=sarvam_model,
             voice_id=sarvam_voice,
             params=SarvamHttpTTSService.InputParams(
                 language=Language.HI,
-                pitch=0.0,
-                pace=0.85,
-                loudness=1.2,
+                temperature=0.6,
             ),
         )
     elif tts_type == "edge":
