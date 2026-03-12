@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     InputAudioRawFrame,
+    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -245,10 +246,18 @@ class AssistantTranscriptCapture(FrameProcessor):
             self._buffer = ""
             self._capturing = True
         elif isinstance(frame, TextFrame) and self._capturing:
-            # Skip function-call representations emitted by some LLMs (e.g. Groq/llama)
-            # Format: <function=tool_name>{...}</function>
-            if not frame.text.startswith("<function"):
-                self._buffer += frame.text
+            # Skip function-call representations emitted by some LLMs (e.g. Groq/llama).
+            # Smaller models write tool calls as text instead of API tool_calls:
+            #   <function=name>{}   (opening tag)
+            #   </function>         (closing tag)
+            #   (function=name>{}   (parenthesis variant)
+            t = frame.text
+            if not (
+                t.startswith("<function")      # <function=name>...
+                or t.startswith("</function")  # </function>
+                or t.startswith("(function")   # (function=name>...
+            ):
+                self._buffer += t
         elif isinstance(frame, LLMFullResponseEndFrame):
             if self._buffer.strip():
                 _add_transcript(self._pc_id, "assistant", self._buffer)
@@ -1063,22 +1072,46 @@ class BotSpeakingObserver(BaseObserver):
 
 
 class EchoSuppressGate(FrameProcessor):
-    """Drop InputAudioRawFrame while the bot is speaking to suppress echo.
+    """Drop audio and VAD frames while the bot is speaking to suppress echo.
 
     Reads bot-speaking state from the shared `state` dict kept up-to-date by
     BotSpeakingObserver.  Place immediately after transport.input().
+
+    Blocks while bot is speaking:
+      - InputAudioRawFrame       — prevent echo audio reaching STT
+      - VADUserStartedSpeakingFrame  — prevent echo from starting an STT segment
+      - VADUserStoppedSpeakingFrame  — if we blocked the start, drop the stop too
+        (otherwise SegmentedSTTService would try to transcribe an empty buffer)
     """
 
     def __init__(self, state: dict):
         super().__init__()
         self._state = state
+        self._suppressed_vad_start = False  # tracks whether we swallowed a VAD start
 
     async def process_frame(self, frame: Frame, direction):
         await super().process_frame(frame, direction)
+        bot_speaking = self._state["bot_speaking"]
+
         if isinstance(frame, InputAudioRawFrame):
-            if not self._state["bot_speaking"]:
+            if not bot_speaking:
                 await self.push_frame(frame, direction)
-            # else: silently drop (echo suppressed)
+
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            if bot_speaking:
+                self._suppressed_vad_start = True  # remember we suppressed it
+            else:
+                self._suppressed_vad_start = False
+                await self.push_frame(frame, direction)
+
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            if self._suppressed_vad_start:
+                # We blocked the matching start → also block stop so STT doesn't
+                # try to transcribe the empty audio buffer.
+                self._suppressed_vad_start = False
+            else:
+                await self.push_frame(frame, direction)
+
         else:
             await self.push_frame(frame, direction)
 
@@ -1248,7 +1281,10 @@ def create_llm(llm_type: str):
             logger.info(f"LLM: Ollama ({model}) at {ollama_url}")
             return OLLamaLLMService(model=model, base_url=ollama_url)
         elif groq_key:
-            model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+            # llama-3.1-8b-instant is too small for reliable tool_calls — it falls back
+            # to text-based function call format which pipecat can't execute.
+            # llama-3.3-70b-versatile has much stronger function-calling support.
+            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
             logger.info(f"LLM: Groq fallback ({model})")
             return OpenAILLMService(
                 api_key=groq_key,
