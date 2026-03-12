@@ -63,12 +63,21 @@ from pipecat.services.sarvam.tts import SarvamHttpTTSService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.ollama.llm import OLLamaLLMService
 from pipecat.transcriptions.language import Language
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
 from edge_tts_service import EdgeTTSService
-from pipecat_flows import FlowArgs, FlowManager, FlowsFunctionSchema, NodeConfig
+from pipecat_flows import (
+    FlowArgs,
+    FlowManager,
+    FlowsFunctionSchema,
+    NodeConfig,
+    ContextStrategy,
+    ContextStrategyConfig,
+)
 
 # Optional DB save — gracefully skipped if database module not available
 try:
@@ -148,6 +157,7 @@ def _make_role_message(cfg: dict) -> dict:
             "- Warm, professional, empathetic — NEVER threatening or rude.\n"
             "- Short, natural sentences (this is a voice call, not text).\n"
             "- No bullet points, markdown, special characters, or emojis.\n"
+            "- No XML tags, angle brackets (<>), or any HTML-like formatting.\n"
             "- Max 2-3 sentences at a time.\n"
             "- You must ALWAYS use one of the available functions to progress the conversation.\n"
             "- CRITICAL: Only call functions listed in your CURRENT step's instructions. "
@@ -1123,6 +1133,24 @@ def create_stt(stt_type: str):
         )
 
 
+def _clean_tts_text(text: str) -> str:
+    """Strip XML/angle-bracket wrapping that some LLMs (Groq/llama) emit.
+
+    Groq's llama models sometimes wrap responses in pseudo-XML like:
+        <Rajesh Kumar ji, ...>content</Rajesh Kumar ji, ...?>
+    The TTS service would speak the literal '<' and '>' characters.
+    This strips those outer wrappers while preserving the spoken content.
+    """
+    import re
+    # Remove standard HTML/XML tags: <b>, <br/>, </span>, etc. (short tag names only)
+    text = re.sub(r'</?[a-zA-Z][a-zA-Z0-9_-]{0,20}(?:\s[^>]{0,100})?/?>', '', text)
+    # Remove outer wrapping if entire text looks like <...content...</...>
+    # (tag "names" are long sentences — a llama-specific quirk)
+    text = re.sub(r'^<[^/][^>]*>', '', text.strip())   # remove opening <...> at start
+    text = re.sub(r'</[^>]*>$', '', text.strip())       # remove closing </...> at end
+    return text.strip()
+
+
 class _SarvamV3TTSService(SarvamHttpTTSService):
     """Workaround for pipecat 0.0.101 bug: SarvamHttpTTSService.run_tts()
     always sends pitch/pace/loudness in the payload even for bulbul:v3, which
@@ -1130,6 +1158,7 @@ class _SarvamV3TTSService(SarvamHttpTTSService):
     v3 payload so we can use bulbul:v3 + priya voice."""
 
     async def run_tts(self, text: str):
+        text = _clean_tts_text(text)
         from pipecat.services.sarvam._sdk import sdk_headers
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
@@ -1264,9 +1293,19 @@ async def run_bot(
     logger.info(f"Agent: {cfg['agent_name']} @ {cfg['company_name']} | Borrower: {cfg['borrower_name']}")
 
     # --- Transport (WebRTC — no explicit sample rates, matches working Agent_pipecat) ---
+    # Whisper (SegmentedSTTService) needs client-side VAD to emit
+    # VADUserStartedSpeakingFrame / VADUserStoppedSpeakingFrame — without these
+    # it never buffers or transcribes audio.  Deepgram and Sarvam have server-side
+    # VAD so they don't need this.
+    _needs_local_vad = stt_type == "whisper"
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
-        params=TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_enabled=_needs_local_vad,
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)) if _needs_local_vad else None,
+        ),
     )
 
     # --- Services ---
@@ -1348,11 +1387,21 @@ async def run_bot(
     )
 
     # --- Flow Manager ---
+    # Groq/llama models hallucinate function calls from previous nodes when context
+    # is accumulated (APPEND strategy): they see old function names in system messages
+    # and call them even though they're not in the current tools list.  Groq's API
+    # then rejects the call → "tool call validation failed" error.
+    # Fix: use RESET strategy for Groq/ollama so each node starts with a clean context.
+    # OpenAI (gpt-4o) handles accumulated context correctly, so APPEND is fine there.
+    _groq_like_llm = llm_type in ("groq", "ollama")
     flow_manager = FlowManager(
         task=task,
         llm=llm,
         context_aggregator=context_aggregator,
         transport=transport,
+        context_strategy=ContextStrategyConfig(
+            strategy=ContextStrategy.RESET if _groq_like_llm else ContextStrategy.APPEND
+        ),
     )
 
     # --- Session tracking for the dashboard API + DB save ---
