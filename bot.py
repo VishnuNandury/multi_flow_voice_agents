@@ -235,7 +235,10 @@ class AssistantTranscriptCapture(FrameProcessor):
             self._buffer = ""
             self._capturing = True
         elif isinstance(frame, TextFrame) and self._capturing:
-            self._buffer += frame.text
+            # Skip function-call representations emitted by some LLMs (e.g. Groq/llama)
+            # Format: <function=tool_name>{...}</function>
+            if not frame.text.startswith("<function"):
+                self._buffer += frame.text
         elif isinstance(frame, LLMFullResponseEndFrame):
             if self._buffer.strip():
                 _add_transcript(self._pc_id, "assistant", self._buffer)
@@ -999,61 +1002,75 @@ def set_active_flow(flow_id: str):
 _init_flow_catalog()  # must be called after all node-creator functions are defined
 
 # ---------------------------------------------------------------------------
-# Echo suppression gate — prevents bot TTS audio from being picked up by STT
+# Echo suppression — observer-driven approach
 # ---------------------------------------------------------------------------
+# Problem: BotStartedSpeakingFrame / BotStoppedSpeakingFrame travel UPSTREAM
+# from transport.output(), but OpenAI Whisper STTService does not propagate
+# upstream frames through itself, so an EchoSuppressGate placed before the
+# STT service never sees those frames and stays permanently open (or closed).
+#
+# Fix: BotSpeakingObserver hooks into the PipelineTask observer mechanism
+# (BaseObserver.on_push_frame sees ALL frame pushes regardless of direction),
+# and writes bot-speaking state into a shared dict.  EchoSuppressGate reads
+# that shared dict instead of tracking upstream frames internally.
+# ---------------------------------------------------------------------------
+
+class BotSpeakingObserver(BaseObserver):
+    """Observer that tracks bot speaking state in a shared dict.
+
+    Pass the same `state` dict to both this observer and EchoSuppressGate.
+    The dict has two keys:
+      "bot_speaking" : bool   — True while bot TTS audio is playing
+      "stopped_at"   : float  — monotonic time when bot stopped (or 0.0)
+    """
+
+    def __init__(self, state: dict):
+        super().__init__()
+        self._state = state
+        self._open_task: asyncio.Task | None = None
+
+    async def on_push_frame(self, data: FramePushed):
+        frame = data.frame
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._state["bot_speaking"] = True
+            self._state["stopped_at"] = 0.0
+            if self._open_task and not self._open_task.done():
+                self._open_task.cancel()
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            if self._open_task and not self._open_task.done():
+                self._open_task.cancel()
+            self._open_task = asyncio.get_event_loop().create_task(
+                self._reopen()
+            )
+
+    async def _reopen(self):
+        """Wait tail period then clear bot_speaking flag."""
+        try:
+            await asyncio.sleep(0.30)  # 300 ms tail to let speaker reverb clear
+            self._state["bot_speaking"] = False
+        except asyncio.CancelledError:
+            pass
+
 
 class EchoSuppressGate(FrameProcessor):
     """Drop InputAudioRawFrame while the bot is speaking to suppress echo.
 
-    The bot's TTS audio plays through the user's speakers.  Their microphone
-    picks it up and sends it back via WebRTC.  Without this gate the STT
-    (especially Sarvam with high_vad_sensitivity) transcribes that echo as
-    user speech, firing false interruptions.
-
-    BotStartedSpeakingFrame / BotStoppedSpeakingFrame travel UPSTREAM from
-    transport.output() so they pass through this gate naturally.
-    After the bot stops we wait TAIL_MS before re-opening so any speaker
-    reverberation can clear before we start accepting user audio again.
-
-    Place immediately after transport.input() in the pipeline.
+    Reads bot-speaking state from the shared `state` dict kept up-to-date by
+    BotSpeakingObserver.  Place immediately after transport.input().
     """
 
-    TAIL_MS = 300  # ms after bot stops before re-enabling mic
-
-    def __init__(self):
+    def __init__(self, state: dict):
         super().__init__()
-        self._bot_speaking = False
-        self._open_task: asyncio.Task = None
+        self._state = state
 
     async def process_frame(self, frame: Frame, direction):
         await super().process_frame(frame, direction)
-
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-            if self._open_task and not self._open_task.done():
-                self._open_task.cancel()
-            await self.push_frame(frame, direction)
-
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            if self._open_task and not self._open_task.done():
-                self._open_task.cancel()
-            self._open_task = asyncio.get_event_loop().create_task(self._reopen())
-            await self.push_frame(frame, direction)
-
-        elif isinstance(frame, InputAudioRawFrame):
-            if not self._bot_speaking:
+        if isinstance(frame, InputAudioRawFrame):
+            if not self._state["bot_speaking"]:
                 await self.push_frame(frame, direction)
             # else: silently drop (echo suppressed)
-
         else:
             await self.push_frame(frame, direction)
-
-    async def _reopen(self):
-        try:
-            await asyncio.sleep(self.TAIL_MS / 1000.0)
-            self._bot_speaking = False
-        except asyncio.CancelledError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -1271,7 +1288,12 @@ async def run_bot(
     # --- Transcript capture processors ---
     user_capture = UserTranscriptCapture(pc_id)
     assistant_capture = AssistantTranscriptCapture(pc_id)
-    echo_gate = EchoSuppressGate()
+
+    # Echo suppression: shared state dict updated by BotSpeakingObserver (which
+    # sees all frame pushes regardless of direction) and read by EchoSuppressGate.
+    _echo_state = {"bot_speaking": False, "stopped_at": 0.0}
+    echo_gate = EchoSuppressGate(_echo_state)
+    echo_observer = BotSpeakingObserver(_echo_state)
 
     # --- Unknown-tool recovery: catch LLM hallucinating tool names not in current node ---
     _bad_tool_count = [0]
@@ -1320,6 +1342,7 @@ async def run_bot(
         observers=[
             MetricsLogObserver(),               # Logs to console for debugging
             SessionMetricsObserver(pc_id),      # Captures to session_data for UI/DB
+            echo_observer,                      # Tracks bot speaking state for echo gate
         ],
         idle_timeout_secs=300,
     )
