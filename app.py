@@ -134,6 +134,7 @@ _next_pipeline: Dict[str, Any] = {
     "pipeline_tts": "openai",
     "pipeline_llm": "openai",
     "agent_config": {},
+    "flow_id": "full_collection",
 }
 
 # ---------------------------------------------------------------------------
@@ -438,9 +439,12 @@ async def set_pipeline(request: Request):
         "pipeline_tts": data.get("tts", "openai"),
         "pipeline_llm": data.get("llm", "openai"),
         "agent_config": data.get("config", {}),
+        "flow_id": data.get("flow_id", "full_collection"),
     }
+    bot_module.set_active_flow(_next_pipeline["flow_id"])
     logger.info(f"Pipeline selected: STT={_next_pipeline['pipeline_stt']}, "
-                f"TTS={_next_pipeline['pipeline_tts']}, LLM={_next_pipeline['pipeline_llm']}")
+                f"TTS={_next_pipeline['pipeline_tts']}, LLM={_next_pipeline['pipeline_llm']}, "
+                f"Flow={_next_pipeline['flow_id']}")
     return {"status": "ok", "pipeline": _next_pipeline}
 
 
@@ -1077,10 +1081,11 @@ async def whatsapp_webhook(
     tts = _next_pipeline.get("pipeline_tts", "openai")
     llm = _next_pipeline.get("pipeline_llm", "openai")
     agent_config = _next_pipeline.get("agent_config", {})
+    flow_id = _next_pipeline.get("flow_id", "full_collection")
 
     async def whatsapp_connection_callback(connection: SmallWebRTCConnection):
         logger.info(f"WhatsApp WebRTC connection established (STT={stt}, TTS={tts}, LLM={llm})")
-        background_tasks.add_task(bot_module.run_bot, connection, stt, tts, llm, agent_config, _aiohttp_session)
+        background_tasks.add_task(bot_module.run_bot, connection, stt, tts, llm, agent_config, _aiohttp_session, flow_id)
 
     try:
         ok = await _whatsapp_client.handle_webhook_request(
@@ -1251,11 +1256,12 @@ async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
     tts = pipeline_config.get("pipeline_tts", _next_pipeline.get("pipeline_tts", "openai"))
     llm = pipeline_config.get("pipeline_llm", _next_pipeline.get("pipeline_llm", "openai"))
     agent_config = _next_pipeline.get("agent_config", {})
-    logger.info(f"POST /api/offer - Pipeline: STT={stt}, TTS={tts}, LLM={llm}")
+    flow_id = _next_pipeline.get("flow_id", "full_collection")
+    logger.info(f"POST /api/offer - Pipeline: STT={stt}, TTS={tts}, LLM={llm}, Flow={flow_id}")
 
     async def webrtc_connection_callback(connection: SmallWebRTCConnection):
         logger.info(f"WebRTC connection established (STT={stt}, TTS={tts}, LLM={llm})")
-        background_tasks.add_task(bot_module.run_bot, connection, stt, tts, llm, agent_config, _aiohttp_session)
+        background_tasks.add_task(bot_module.run_bot, connection, stt, tts, llm, agent_config, _aiohttp_session, flow_id)
 
     try:
         answer = await small_webrtc_handler.handle_web_request(
@@ -1375,6 +1381,18 @@ async def get_active_flow():
 async def get_flow_nodes():
     """Return the list of flow node definitions and edges."""
     return {"nodes": bot_module.FLOW_NODES, "edges": bot_module.FLOW_EDGES}
+
+
+@app.get("/api/flows")
+async def list_flows():
+    """Return all available conversation flows for the flow selector UI."""
+    return {
+        "flows": [
+            {"id": k, "label": v["label"]}
+            for k, v in bot_module.FLOW_CATALOG.items()
+        ],
+        "active": bot_module._active_flow_id,
+    }
 
 
 # ---------------------------------------------------------------------------

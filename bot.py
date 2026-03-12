@@ -35,6 +35,8 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     MetricsFrame,
     BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    InputAudioRawFrame,
     VADUserStoppedSpeakingFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -148,6 +150,8 @@ def _make_role_message(cfg: dict) -> dict:
             "- No bullet points, markdown, special characters, or emojis.\n"
             "- Max 2-3 sentences at a time.\n"
             "- You must ALWAYS use one of the available functions to progress the conversation.\n"
+            "- CRITICAL: Only call functions listed in your CURRENT step's instructions. "
+            "Never invent or reuse function names from other steps.\n"
             "- Your responses will be converted to audio so avoid any formatting."
         ),
     }
@@ -164,36 +168,22 @@ def _make_borrower_info(cfg: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Flow state + session tracking — exposed to app.py for dashboard API
+# Flow catalog — multiple conversation flows selectable from the UI
 # ---------------------------------------------------------------------------
 
-FLOW_NODES = [
-    {"id": "greeting",            "label": "Greeting"},
-    {"id": "overdue_info",        "label": "Overdue Info"},
-    {"id": "understand_situation","label": "Situation"},
-    {"id": "payment_options",     "label": "Options"},
-    {"id": "commitment",          "label": "Commitment"},
-    {"id": "promise_to_pay",      "label": "PTP"},
-    {"id": "end",                 "label": "Complete"},
-    # Terminal nodes (reached via short-circuit paths)
-    {"id": "wrong_person",        "label": "Wrong Person", "terminal": True},
-    {"id": "callback",            "label": "Callback",     "terminal": True},
-]
+# Active flow globals (updated by set_active_flow, read by /api/active-flow)
+_active_flow_id: str = "full_collection"
+FLOW_NODES: list = []
+FLOW_EDGES: list = []
 
-# Directed edges: which nodes can follow which (for graph viz)
-FLOW_EDGES = [
-    {"from": "greeting",            "to": "overdue_info",        "label": "confirmed"},
-    {"from": "greeting",            "to": "wrong_person",        "label": "wrong person"},
-    {"from": "overdue_info",        "to": "understand_situation","label": ""},
-    {"from": "understand_situation","to": "payment_options",     "label": ""},
-    {"from": "payment_options",     "to": "commitment",          "label": "agreed"},
-    {"from": "payment_options",     "to": "callback",            "label": "callback"},
-    {"from": "commitment",          "to": "promise_to_pay",      "label": ""},
-    {"from": "promise_to_pay",      "to": "end",                 "label": ""},
-]
+# Populated after node-creator functions are defined (see _init_flow_catalog below)
+FLOW_CATALOG: dict = {}
 
 # pc_id -> {current_node, start_time, stt_type, tts_type, llm_type, transcript}
 session_data: dict = {}
+
+# Catalog initialized after node-creator functions are defined (bottom of this block)
+# set_active_flow() and _init_flow_catalog() defined further below.
 
 
 def _track_node(flow_manager: FlowManager, node_name: str):
@@ -755,6 +745,318 @@ def create_callback_end_node(cfg: dict) -> NodeConfig:
 
 
 # ---------------------------------------------------------------------------
+# Short Reminder flow node creators (5 nodes)
+# ---------------------------------------------------------------------------
+
+def create_short_reminder_greeting_node(cfg: dict) -> NodeConfig:
+    """Short flow — Node 1: Greet and confirm identity."""
+    role_msg = _make_role_message(cfg)
+    info = _make_borrower_info(cfg)
+    bname = cfg["borrower_name"]
+    aname = cfg["agent_name"]
+    cname = cfg["company_name"]
+
+    async def confirm_identity(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+        flow_manager.state["identity_confirmed"] = True
+        _track_node(flow_manager, "overdue_info")
+        return f"Identity confirmed as {bname}", _short_reminder_overdue_node(cfg)
+
+    async def wrong_person(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+        _track_node(flow_manager, "end")
+        _pc = flow_manager.state.get("pc_id", "")
+        if _pc in session_data:
+            session_data[_pc]["outcome"] = "wrong_person"
+        return "Wrong person on the line", create_wrong_person_end_node(cfg)
+
+    return NodeConfig(
+        name="greeting",
+        role_messages=[role_msg],
+        task_messages=[{
+            "role": "system",
+            "content": (
+                f'Greet briefly in Hinglish: "Namaste, kya main {bname} ji se baat kar rahi hoon? '
+                f'Main {aname}, {cname} se."\n\n'
+                f"Use confirm_identity if they confirm, wrong_person if they deny.\n\n{info}"
+            ),
+        }],
+        functions=[
+            FlowsFunctionSchema(name="confirm_identity", handler=confirm_identity,
+                description="Call when the person confirms they are the borrower.",
+                properties={}, required=[]),
+            FlowsFunctionSchema(name="wrong_person", handler=wrong_person,
+                description="Call when the person says they are not the borrower.",
+                properties={}, required=[]),
+        ],
+    )
+
+
+def _short_reminder_overdue_node(cfg: dict) -> NodeConfig:
+    """Short flow — Node 2: Brief overdue info."""
+    info = _make_borrower_info(cfg)
+    bname = cfg["borrower_name"]
+
+    async def acknowledge(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+        _track_node(flow_manager, "promise_to_pay")
+        return "Borrower acknowledged", _short_reminder_ptp_node(cfg)
+
+    return NodeConfig(
+        name="overdue_info",
+        task_messages=[{
+            "role": "system",
+            "content": (
+                f'Briefly inform: "{bname} ji, aapke {cfg["overdue_months"]} EMIs pending hain. '
+                f'Total Rs. {cfg["total_due"]} outstanding hai."\n\n'
+                f"After any response use acknowledge to continue.\n\n{info}"
+            ),
+        }],
+        functions=[
+            FlowsFunctionSchema(name="acknowledge", handler=acknowledge,
+                description="Call after the borrower has responded to the overdue info.",
+                properties={}, required=[]),
+        ],
+    )
+
+
+def _short_reminder_ptp_node(cfg: dict) -> NodeConfig:
+    """Short flow — Node 3: Ask for payment commitment."""
+    bname = cfg["borrower_name"]
+    info = _make_borrower_info(cfg)
+
+    async def confirm_ptp(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+        _track_node(flow_manager, "end")
+        _pc = flow_manager.state.get("pc_id", "")
+        if _pc in session_data:
+            session_data[_pc]["outcome"] = "promise_to_pay"
+        return "Payment commitment received", create_ptp_end_node(cfg)
+
+    async def request_callback(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+        _track_node(flow_manager, "callback")
+        _pc = flow_manager.state.get("pc_id", "")
+        if _pc in session_data:
+            session_data[_pc]["outcome"] = "callback"
+        return "Callback requested", create_callback_end_node(cfg)
+
+    return NodeConfig(
+        name="promise_to_pay",
+        task_messages=[{
+            "role": "system",
+            "content": (
+                f"Ask when they can make the payment. If they give a date, call confirm_ptp. "
+                f"If they need more time or a senior callback, call request_callback.\n\n{info}"
+            ),
+        }],
+        functions=[
+            FlowsFunctionSchema(name="confirm_ptp", handler=confirm_ptp,
+                description="Call when borrower commits to a payment date.",
+                properties={}, required=[]),
+            FlowsFunctionSchema(name="request_callback", handler=request_callback,
+                description="Call when borrower requests a callback from a senior.",
+                properties={}, required=[]),
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Simple Greeting flow node creators (3 nodes — for testing)
+# ---------------------------------------------------------------------------
+
+def create_simple_greeting_node(cfg: dict) -> NodeConfig:
+    """Simple flow — greet, confirm identity, say goodbye."""
+    role_msg = _make_role_message(cfg)
+    bname = cfg["borrower_name"]
+    aname = cfg["agent_name"]
+    cname = cfg["company_name"]
+
+    async def confirm_identity(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+        _track_node(flow_manager, "end")
+        _pc = flow_manager.state.get("pc_id", "")
+        if _pc in session_data:
+            session_data[_pc]["outcome"] = "complete"
+        return "Identity confirmed", _simple_end_node(cfg)
+
+    async def wrong_person(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+        _track_node(flow_manager, "end")
+        _pc = flow_manager.state.get("pc_id", "")
+        if _pc in session_data:
+            session_data[_pc]["outcome"] = "wrong_person"
+        return "Wrong person", create_wrong_person_end_node(cfg)
+
+    return NodeConfig(
+        name="greeting",
+        role_messages=[role_msg],
+        task_messages=[{
+            "role": "system",
+            "content": (
+                f'Greet warmly: "Namaste, kya main {bname} ji se baat kar rahi hoon? '
+                f'Main {aname}, {cname} se."\n\n'
+                f"If they confirm, use confirm_identity. If wrong person, use wrong_person."
+            ),
+        }],
+        functions=[
+            FlowsFunctionSchema(name="confirm_identity", handler=confirm_identity,
+                description="Call when the person confirms they are the borrower.",
+                properties={}, required=[]),
+            FlowsFunctionSchema(name="wrong_person", handler=wrong_person,
+                description="Call when the person says they are not the borrower.",
+                properties={}, required=[]),
+        ],
+    )
+
+
+def _simple_end_node(cfg: dict) -> NodeConfig:
+    """Simple flow — end after greeting."""
+    bname = cfg["borrower_name"]
+    return NodeConfig(
+        name="end",
+        task_messages=[{
+            "role": "system",
+            "content": (
+                f'Say a brief goodbye: "Dhanyavaad {bname} ji! Aapka din shubh ho. '
+                f'Agar koi sawaal ho toh humein call karein."'
+            ),
+        }],
+        post_actions=[{"type": "end_conversation"}],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Flow catalog + set_active_flow (called after all node creators are defined)
+# ---------------------------------------------------------------------------
+
+def _init_flow_catalog():
+    global FLOW_CATALOG, FLOW_NODES, FLOW_EDGES, _active_flow_id
+    FLOW_CATALOG = {
+        "full_collection": {
+            "label": "Full Loan Collection",
+            "entry": create_greeting_node,
+            "nodes": [
+                {"id": "greeting",             "label": "Greeting"},
+                {"id": "overdue_info",         "label": "Overdue Info"},
+                {"id": "understand_situation", "label": "Situation"},
+                {"id": "payment_options",      "label": "Options"},
+                {"id": "commitment",           "label": "Commitment"},
+                {"id": "promise_to_pay",       "label": "PTP"},
+                {"id": "end",                  "label": "Complete"},
+                {"id": "wrong_person",         "label": "Wrong Person", "terminal": True},
+                {"id": "callback",             "label": "Callback",     "terminal": True},
+            ],
+            "edges": [
+                {"from": "greeting",             "to": "overdue_info",         "label": "confirmed"},
+                {"from": "greeting",             "to": "wrong_person",         "label": "wrong person"},
+                {"from": "overdue_info",         "to": "understand_situation", "label": ""},
+                {"from": "understand_situation", "to": "payment_options",      "label": ""},
+                {"from": "payment_options",      "to": "commitment",           "label": "agreed"},
+                {"from": "payment_options",      "to": "callback",             "label": "callback"},
+                {"from": "commitment",           "to": "promise_to_pay",       "label": ""},
+                {"from": "promise_to_pay",       "to": "end",                  "label": ""},
+            ],
+        },
+        "short_reminder": {
+            "label": "Short Payment Reminder",
+            "entry": create_short_reminder_greeting_node,
+            "nodes": [
+                {"id": "greeting",       "label": "Greeting"},
+                {"id": "overdue_info",   "label": "Overdue Info"},
+                {"id": "promise_to_pay", "label": "PTP"},
+                {"id": "end",            "label": "Complete"},
+                {"id": "wrong_person",   "label": "Wrong Person", "terminal": True},
+                {"id": "callback",       "label": "Callback",     "terminal": True},
+            ],
+            "edges": [
+                {"from": "greeting",       "to": "overdue_info",   "label": "confirmed"},
+                {"from": "greeting",       "to": "wrong_person",   "label": "wrong person"},
+                {"from": "overdue_info",   "to": "promise_to_pay", "label": ""},
+                {"from": "promise_to_pay", "to": "end",            "label": "committed"},
+                {"from": "promise_to_pay", "to": "callback",       "label": "defer"},
+            ],
+        },
+        "simple_greeting": {
+            "label": "Simple Test / Greeting",
+            "entry": create_simple_greeting_node,
+            "nodes": [
+                {"id": "greeting",    "label": "Greeting"},
+                {"id": "end",         "label": "Complete"},
+                {"id": "wrong_person","label": "Wrong Person", "terminal": True},
+            ],
+            "edges": [
+                {"from": "greeting", "to": "end",          "label": "confirmed"},
+                {"from": "greeting", "to": "wrong_person", "label": "wrong person"},
+            ],
+        },
+    }
+    set_active_flow("full_collection")
+
+
+def set_active_flow(flow_id: str):
+    """Update FLOW_NODES and FLOW_EDGES to reflect the selected flow."""
+    global FLOW_NODES, FLOW_EDGES, _active_flow_id
+    flow = FLOW_CATALOG.get(flow_id) or FLOW_CATALOG.get("full_collection")
+    _active_flow_id = flow_id if flow_id in FLOW_CATALOG else "full_collection"
+    FLOW_NODES = flow["nodes"]
+    FLOW_EDGES = flow["edges"]
+
+
+_init_flow_catalog()  # must be called after all node-creator functions are defined
+
+# ---------------------------------------------------------------------------
+# Echo suppression gate — prevents bot TTS audio from being picked up by STT
+# ---------------------------------------------------------------------------
+
+class EchoSuppressGate(FrameProcessor):
+    """Drop InputAudioRawFrame while the bot is speaking to suppress echo.
+
+    The bot's TTS audio plays through the user's speakers.  Their microphone
+    picks it up and sends it back via WebRTC.  Without this gate the STT
+    (especially Sarvam with high_vad_sensitivity) transcribes that echo as
+    user speech, firing false interruptions.
+
+    BotStartedSpeakingFrame / BotStoppedSpeakingFrame travel UPSTREAM from
+    transport.output() so they pass through this gate naturally.
+    After the bot stops we wait TAIL_MS before re-opening so any speaker
+    reverberation can clear before we start accepting user audio again.
+
+    Place immediately after transport.input() in the pipeline.
+    """
+
+    TAIL_MS = 300  # ms after bot stops before re-enabling mic
+
+    def __init__(self):
+        super().__init__()
+        self._bot_speaking = False
+        self._open_task: asyncio.Task = None
+
+    async def process_frame(self, frame: Frame, direction):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+            if self._open_task and not self._open_task.done():
+                self._open_task.cancel()
+            await self.push_frame(frame, direction)
+
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            if self._open_task and not self._open_task.done():
+                self._open_task.cancel()
+            self._open_task = asyncio.get_event_loop().create_task(self._reopen())
+            await self.push_frame(frame, direction)
+
+        elif isinstance(frame, InputAudioRawFrame):
+            if not self._bot_speaking:
+                await self.push_frame(frame, direction)
+            # else: silently drop (echo suppressed)
+
+        else:
+            await self.push_frame(frame, direction)
+
+    async def _reopen(self):
+        try:
+            await asyncio.sleep(self.TAIL_MS / 1000.0)
+            self._bot_speaking = False
+        except asyncio.CancelledError:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Service factories (multi-pipeline)
 # ---------------------------------------------------------------------------
 
@@ -933,6 +1235,7 @@ async def run_bot(
     llm_type: str = "openai",
     agent_config: dict = None,
     aiohttp_session=None,
+    flow_id: str = "full_collection",
 ):
     """Create and run the voice agent pipeline with PipeCat Flows."""
 
@@ -968,11 +1271,34 @@ async def run_bot(
     # --- Transcript capture processors ---
     user_capture = UserTranscriptCapture(pc_id)
     assistant_capture = AssistantTranscriptCapture(pc_id)
+    echo_gate = EchoSuppressGate()
+
+    # --- Unknown-tool recovery: catch LLM hallucinating tool names not in current node ---
+    _bad_tool_count = [0]
+
+    async def _unknown_tool_handler(params):
+        fn_name = getattr(params, "function_name", "unknown")
+        _bad_tool_count[0] += 1
+        logger.warning(f"LLM called unknown tool '{fn_name}' (count={_bad_tool_count[0]})")
+        if _bad_tool_count[0] >= 3:
+            logger.error("Too many unknown tool calls — ending session")
+            await params.result_callback({"error": "Max retries exceeded"})
+            await task.queue_frames([EndFrame()])
+            return
+        await params.result_callback({
+            "error": (
+                f"'{fn_name}' is not available in this step. "
+                "Use only the functions listed in your current instructions."
+            )
+        })
+
+    llm.register_function(None, _unknown_tool_handler)
 
     # --- Pipeline ---
     pipeline = Pipeline(
         [
             transport.input(),
+            echo_gate,          # suppress bot-audio echo reaching STT
             stt,
             user_capture,
             context_aggregator.user(),
@@ -1029,9 +1355,11 @@ async def run_bot(
     # --- Event handlers ---
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected ({stt_type}+{tts_type}+{llm_type})")
+        logger.info(f"Client connected ({stt_type}+{tts_type}+{llm_type}+{flow_id})")
         flow_manager.state["pc_id"] = pc_id
-        await flow_manager.initialize(create_greeting_node(cfg))
+        flow_def = FLOW_CATALOG.get(flow_id) or FLOW_CATALOG["full_collection"]
+        entry_node = flow_def["entry"](cfg)
+        await flow_manager.initialize(entry_node)
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

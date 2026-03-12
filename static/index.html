@@ -603,6 +603,13 @@ function renderAgent(el) {
           <div class="cfg-field"><label>Language</label>
             <select id="cfg-lang"><option value="hinglish">Hinglish (Hindi + English)</option><option value="hindi">Hindi</option><option value="english">English</option></select>
           </div>
+          <div class="cfg-field"><label>Conversation Flow</label>
+            <select id="cfg-flow">
+              <option value="full_collection">Full Loan Collection</option>
+              <option value="short_reminder">Short Payment Reminder</option>
+              <option value="simple_greeting">Simple Test / Greeting</option>
+            </select>
+          </div>
         </div>
         <div class="cfg-col">
           <h4>Borrower Scenario</h4>
@@ -764,7 +771,8 @@ async function selectPipeline(idx) {
     overdue_months: document.getElementById('cfg-months')?.value || '2',
     account_number: document.getElementById('cfg-account')?.value || 'QF-2024-78432',
   };
-  await api('/set-pipeline', { method:'POST', body: JSON.stringify({ stt:p.stt, tts:p.tts, llm:p.llm, config }) });
+  const flow_id = document.getElementById('cfg-flow')?.value || 'full_collection';
+  await api('/set-pipeline', { method:'POST', body: JSON.stringify({ stt:p.stt, tts:p.tts, llm:p.llm, config, flow_id }) });
   showLiveSession(p);
 }
 

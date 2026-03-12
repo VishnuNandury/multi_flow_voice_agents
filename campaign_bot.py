@@ -64,6 +64,7 @@ from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.serializers.exotel import ExotelFrameSerializer
 
 from pipecat_flows import FlowArgs, FlowManager, FlowsFunctionSchema, NodeConfig
+from pipecat.extensions.voicemail.voicemail_detector import VoicemailDetector
 
 from bot import _build_config, _make_role_message, create_stt, create_tts, create_llm
 
@@ -738,16 +739,41 @@ async def run_campaign_bot(
     user_capture = UserTranscriptCapture(call_id)
     assistant_capture = AssistantTranscriptCapture(call_id)
 
-    # --- Pipeline with DTMFAggregator ---
+    # --- Voicemail detection (outbound calls only) ---
+    cfg = _build_config(customer)
+    vmd_llm = create_llm(llm_type)   # separate LLM instance for classifier
+    voicemail_detector = VoicemailDetector(
+        llm=vmd_llm,
+        voicemail_response_delay=float(os.getenv("VMD_DELAY_SECS", "2.5")),
+    )
+
+    @voicemail_detector.event_handler("on_voicemail_detected")
+    async def on_voicemail(processor):
+        logger.info(f"[call_id={call_id}] Voicemail detected — leaving automated message")
+        from pipecat.frames.frames import TTSSpeakFrame
+        msg = (
+            f"Namaste, yeh {cfg['company_name']} ki taraf se {cfg['borrower_name']} ji ke liye "
+            f"ek zaroori message hai. Aapke {cfg['overdue_months']} EMIs pending hain. "
+            f"Kripya jaldi se humse sampark karein. Dhanyavaad."
+        )
+        await processor.push_frame(TTSSpeakFrame(msg))
+
+    @voicemail_detector.event_handler("on_conversation_detected")
+    async def on_human(processor):
+        logger.info(f"[call_id={call_id}] Human answered — proceeding with collection flow")
+
+    # --- Pipeline with DTMFAggregator + voicemail detection ---
     pipeline = Pipeline([
         transport.input(),
         stt,
+        voicemail_detector.detector(),
         DTMFAggregator(),
         user_capture,
         context_aggregator.user(),
         llm,
         assistant_capture,
         tts,
+        voicemail_detector.gate(),
         transport.output(),
         context_aggregator.assistant(),
     ])
