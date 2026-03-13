@@ -381,7 +381,7 @@ const PIPELINES = [
   { stt:'deepgram', tts:'edge',    llm:'openai',  label:'Deepgram + Edge TTS',     desc:'Deepgram Nova-3 STT with free Microsoft Edge TTS. Excellent Hindi pronunciation.', requires:['deepgram','openai'] },
   { stt:'whisper',  tts:'openai',  llm:'openai',  label:'Whisper + OpenAI TTS',    desc:'OpenAI Whisper (gpt-4o-transcribe) STT with OpenAI voice synthesis.', requires:['openai'] },
   { stt:'whisper',  tts:'edge',    llm:'openai',  label:'Whisper + Edge TTS',      desc:'OpenAI Whisper STT with free Microsoft Edge TTS.', requires:['openai'] },
-  { stt:'sarvam',   tts:'sarvam',  llm:'sarvam',  label:'Sarvam AI (Full Stack)', desc:'Indian-made Sarvam AI — saarika STT + bulbul TTS + Sarvam LLM. Best for Indian languages. Only SARVAM_API_KEY needed.', requires:['sarvam'], featured:true },
+  { stt:'sarvam',   tts:'sarvam',  llm:'ollama',  label:'Sarvam AI + Groq/Ollama', desc:'Indian-made Sarvam AI (saarika STT + bulbul TTS) with Groq or Ollama LLM. Best for Indian languages.', requires:['sarvam'], featured:true },
   { type:'inya', label:'inya.ai Agent', desc:'Full-stack Indian voice AI managed by inya.ai (by Gnani.ai). inya handles STT, TTS and LLM. Calls are initiated via inya and outcomes sync back here.', requires:['inya'], featured:true },
 ];
 
