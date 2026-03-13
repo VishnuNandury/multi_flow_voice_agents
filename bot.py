@@ -468,22 +468,26 @@ def create_overdue_info_node(cfg: dict) -> NodeConfig:
         _track_node(flow_manager, "understand_situation")
         return "Borrower acknowledged overdue information", create_situation_node(cfg)
 
+    overdue_text = (
+        f"{bname} ji, main aapko ek zaroori baat batana chahti thi. "
+        f"Aapke {cfg['overdue_months']} EMIs pending hain, {cfg['overdue_period']} ke. "
+        f"Total Rs. {cfg['total_due']} outstanding hai including late fee."
+    )
     return NodeConfig(
         name="overdue_info",
         task_messages=[
             {
                 "role": "system",
                 "content": (
-                    f"Politely inform about overdue EMIs. Say something like: "
-                    f'"{bname} ji, main aapko ek zaroori baat batana chahti thi. '
-                    f"Aapke {cfg['overdue_months']} EMIs pending hain, {cfg['overdue_period']} ke. "
-                    f'Total Rs. {cfg["total_due"]} outstanding hai including late fee."\n\n'
-                    f"Be gentle and empathetic. After they respond in any way, "
-                    f"use borrower_responds to move forward.\n\n"
+                    f"The borrower has been informed about their overdue EMIs. "
+                    f"Listen to their response. When they respond in any way "
+                    f"(acknowledgement, question, or anything else), call borrower_responds.\n\n"
                     f"{info}"
                 ),
             }
         ],
+        pre_actions=[{"type": "tts_say", "text": overdue_text}],
+        respond_immediately=False,
         functions=[
             FlowsFunctionSchema(
                 name="borrower_responds",
@@ -506,20 +510,26 @@ def create_situation_node(cfg: dict) -> NodeConfig:
         _track_node(flow_manager, "payment_options")
         return f"Borrower's reason: {reason}", create_payment_options_node(cfg)
 
+    situation_text = (
+        f"Main samajh sakti hoon {bname} ji. "
+        f"Kya aap bata sakte hain ki koi specific wajah thi EMI miss hone ki? "
+        f"Main aapki help karna chahti hoon."
+    )
     return NodeConfig(
         name="understand_situation",
         task_messages=[
             {
                 "role": "system",
                 "content": (
-                    f"Ask empathetically about their situation. Say something like: "
-                    f'"Main samajh sakti hoon {bname} ji. Kya aap bata sakte hain ki '
-                    f"koi specific wajah thi EMI miss hone ki? "
-                    f'Main aapki help karna chahti hoon."\n\n'
-                    f"Listen with empathy, then use record_situation to move to payment options."
+                    f"The borrower has been asked about their situation. "
+                    f"Listen empathetically to their response. "
+                    f"When they share any reason (financial difficulty, job loss, health issue, etc.), "
+                    f"call record_situation with a brief summary of their reason."
                 ),
             }
         ],
+        pre_actions=[{"type": "tts_say", "text": situation_text}],
+        respond_immediately=False,
         functions=[
             FlowsFunctionSchema(
                 name="record_situation",
@@ -566,24 +576,31 @@ def create_payment_options_node(cfg: dict) -> NodeConfig:
             session_data[_pc]["outcome"] = "callback"
         return "Senior representative callback requested", create_callback_end_node(cfg)
 
+    payment_options_text = (
+        f"Aapki baat sun ke main kuch options batana chahti hoon {bname} ji. "
+        f"Pehla option hai Rs. {total} ka full payment abhi — late fee mein discount bhi mil sakta hai. "
+        f"Doosra option hai Rs. {emi} abhi de dijiye aur baaki 15 din mein. "
+        f"Teesra option hai Rs. 4,000 abhi aur baaki 2 installments mein. "
+        f"Aur agar aap chahein toh humare senior representative se baat kar sakte hain. "
+        f"Kaunsa option aapke liye theek rahega?"
+    )
     return NodeConfig(
         name="payment_options",
         task_messages=[
             {
                 "role": "system",
                 "content": (
-                    f"Present payment options naturally and sympathetically. "
-                    f"Do NOT read them as a numbered list. Weave them into conversation.\n\n"
-                    f"Options available:\n"
-                    f"- Full Rs. {total} payment right away (late fee discount possible)\n"
-                    f"- Pay one EMI Rs. {emi} now, remaining within 15 days\n"
-                    f"- Rs. 4,000 now, remaining in 2 easy installments\n"
-                    f"- Request a callback from senior representative for restructuring\n\n"
-                    f"Recommend based on what the borrower has shared. "
-                    f"Use the matching function when they choose."
+                    f"The borrower has been presented with payment options. "
+                    f"Listen to their choice and call the matching function:\n"
+                    f"- select_full_payment: if they agree to full Rs. {total}\n"
+                    f"- select_split_payment: if they want Rs. {emi} now + rest in 15 days\n"
+                    f"- select_partial_plan: if they want Rs. 4,000 now + installments\n"
+                    f"- request_callback: if they want a senior representative callback"
                 ),
             }
         ],
+        pre_actions=[{"type": "tts_say", "text": payment_options_text}],
+        respond_immediately=False,
         functions=[
             FlowsFunctionSchema(
                 name="select_full_payment",
@@ -628,20 +645,23 @@ def create_commitment_node(cfg: dict) -> NodeConfig:
         _track_node(flow_manager, "promise_to_pay")
         return f"Payment commitment: {plan} by {date}", create_promise_to_pay_node(cfg)
 
+    commitment_text = (
+        f"Bahut accha {bname} ji! "
+        f"Kya aap mujhe ek specific date bata sakte hain jab tak aap payment kar denge?"
+    )
     return NodeConfig(
         name="commitment",
         task_messages=[
             {
                 "role": "system",
                 "content": (
-                    f"Confirm the chosen payment plan and ask for a specific date. "
-                    f"Say something like: "
-                    f'"Bahut accha {bname} ji! Kya aap mujhe ek specific date bata sakte hain '
-                    f'jab tak aap payment kar denge?"\n\n'
-                    f"Once they give a date, use confirm_commitment."
+                    f"The borrower has been asked for a payment date. "
+                    f"When they provide a specific date or timeframe, call confirm_commitment with that date."
                 ),
             }
         ],
+        pre_actions=[{"type": "tts_say", "text": commitment_text}],
+        respond_immediately=False,
         functions=[
             FlowsFunctionSchema(
                 name="confirm_commitment",
@@ -679,22 +699,25 @@ def create_promise_to_pay_node(cfg: dict) -> NodeConfig:
         _track_node(flow_manager, "payment_options")
         return "Borrower wants to revise the plan", create_payment_options_node(cfg)
 
+    ptp_text = (
+        f"{bname} ji, toh main confirm kar rahi hoon — "
+        f"aap payment karne ki commitment de rahe hain. "
+        f"Kya aap is commitment ko confirm karte hain? Yeh aapka Promise to Pay hoga."
+    )
     return NodeConfig(
         name="promise_to_pay",
         task_messages=[
             {
                 "role": "system",
                 "content": (
-                    f"Formally confirm the Promise to Pay. Summarize the commitment clearly. "
-                    f"Say something like: "
-                    f'"{bname} ji, toh main confirm kar rahi hoon — aap [plan details] '
-                    f"[date] tak kar denge. Kya aap is commitment ko confirm karte hain? "
-                    f'Yeh aapka Promise to Pay hoga."\n\n'
-                    f"If they confirm, use confirm_ptp. "
-                    f"If they want to change, use revise_plan."
+                    f"The borrower has been asked to confirm their Promise to Pay. "
+                    f"If they confirm (say yes / haan / theek hai / bilkul), call confirm_ptp. "
+                    f"If they want to change the plan, call revise_plan."
                 ),
             }
         ],
+        pre_actions=[{"type": "tts_say", "text": ptp_text}],
+        respond_immediately=False,
         functions=[
             FlowsFunctionSchema(
                 name="confirm_ptp",
@@ -798,17 +821,23 @@ def create_short_reminder_greeting_node(cfg: dict) -> NodeConfig:
             session_data[_pc]["outcome"] = "wrong_person"
         return "Wrong person on the line", create_wrong_person_end_node(cfg)
 
+    short_greeting_text = (
+        f"Namaste, kya main {bname} ji se baat kar rahi hoon? "
+        f"Main {aname}, {cname} se."
+    )
     return NodeConfig(
         name="greeting",
         role_messages=[role_msg],
         task_messages=[{
             "role": "system",
             "content": (
-                f'Greet briefly in Hinglish: "Namaste, kya main {bname} ji se baat kar rahi hoon? '
-                f'Main {aname}, {cname} se."\n\n'
-                f"Use confirm_identity if they confirm, wrong_person if they deny.\n\n{info}"
+                f"The borrower has just been greeted. Listen to their response.\n"
+                f"If they confirm they are {bname}, call confirm_identity.\n"
+                f"If they deny, call wrong_person.\n\n{info}"
             ),
         }],
+        pre_actions=[{"type": "tts_say", "text": short_greeting_text}],
+        respond_immediately=False,
         functions=[
             FlowsFunctionSchema(name="confirm_identity", handler=confirm_identity,
                 description="Call when the person confirms they are the borrower.",
@@ -829,16 +858,21 @@ def _short_reminder_overdue_node(cfg: dict) -> NodeConfig:
         _track_node(flow_manager, "promise_to_pay")
         return "Borrower acknowledged", _short_reminder_ptp_node(cfg)
 
+    short_overdue_text = (
+        f"{bname} ji, aapke {cfg['overdue_months']} EMIs pending hain. "
+        f"Total Rs. {cfg['total_due']} outstanding hai."
+    )
     return NodeConfig(
         name="overdue_info",
         task_messages=[{
             "role": "system",
             "content": (
-                f'Briefly inform: "{bname} ji, aapke {cfg["overdue_months"]} EMIs pending hain. '
-                f'Total Rs. {cfg["total_due"]} outstanding hai."\n\n'
-                f"After any response use acknowledge to continue.\n\n{info}"
+                f"The borrower has been informed about their overdue EMIs. "
+                f"After any response, call acknowledge.\n\n{info}"
             ),
         }],
+        pre_actions=[{"type": "tts_say", "text": short_overdue_text}],
+        respond_immediately=False,
         functions=[
             FlowsFunctionSchema(name="acknowledge", handler=acknowledge,
                 description="Call after the borrower has responded to the overdue info.",
@@ -866,15 +900,19 @@ def _short_reminder_ptp_node(cfg: dict) -> NodeConfig:
             session_data[_pc]["outcome"] = "callback"
         return "Callback requested", create_callback_end_node(cfg)
 
+    short_ptp_text = f"{bname} ji, kab tak aap payment kar sakte hain?"
     return NodeConfig(
         name="promise_to_pay",
         task_messages=[{
             "role": "system",
             "content": (
-                f"Ask when they can make the payment. If they give a date, call confirm_ptp. "
+                f"The borrower has been asked for a payment commitment. "
+                f"If they give a date, call confirm_ptp. "
                 f"If they need more time or a senior callback, call request_callback.\n\n{info}"
             ),
         }],
+        pre_actions=[{"type": "tts_say", "text": short_ptp_text}],
+        respond_immediately=False,
         functions=[
             FlowsFunctionSchema(name="confirm_ptp", handler=confirm_ptp,
                 description="Call when borrower commits to a payment date.",
@@ -1304,8 +1342,18 @@ def create_llm(llm_type: str):
 
     For 'ollama' type: tries Ollama first (OLLAMA_BASE_URL), falls back to
     Groq (GROQ_API_KEY) if Ollama is not configured.
+    For 'sarvam' type: uses Sarvam AI's OpenAI-compatible API.
     """
-    if llm_type == "ollama":
+    if llm_type == "sarvam":
+        sarvam_key = os.getenv("SARVAM_API_KEY", "").strip()
+        model = os.getenv("SARVAM_LLM_MODEL", "sarvam-m")
+        logger.info(f"LLM: Sarvam ({model})")
+        return OpenAILLMService(
+            api_key=sarvam_key,
+            model=model,
+            base_url="https://api.sarvam.ai/v1",
+        )
+    elif llm_type == "ollama":
         ollama_url = os.getenv("OLLAMA_BASE_URL", "").strip()
         groq_key = os.getenv("GROQ_API_KEY", "").strip()
 
@@ -1462,7 +1510,7 @@ async def run_bot(
     # then rejects the call → "tool call validation failed" error.
     # Fix: use RESET strategy for Groq/ollama so each node starts with a clean context.
     # OpenAI (gpt-4o) handles accumulated context correctly, so APPEND is fine there.
-    _groq_like_llm = llm_type in ("groq", "ollama")
+    _groq_like_llm = llm_type in ("groq", "ollama", "sarvam")
     flow_manager = FlowManager(
         task=task,
         llm=llm,

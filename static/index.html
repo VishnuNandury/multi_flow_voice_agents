@@ -381,7 +381,7 @@ const PIPELINES = [
   { stt:'deepgram', tts:'edge',    llm:'openai',  label:'Deepgram + Edge TTS',     desc:'Deepgram Nova-3 STT with free Microsoft Edge TTS. Excellent Hindi pronunciation.', requires:['deepgram','openai'] },
   { stt:'whisper',  tts:'openai',  llm:'openai',  label:'Whisper + OpenAI TTS',    desc:'OpenAI Whisper (gpt-4o-transcribe) STT with OpenAI voice synthesis.', requires:['openai'] },
   { stt:'whisper',  tts:'edge',    llm:'openai',  label:'Whisper + Edge TTS',      desc:'OpenAI Whisper STT with free Microsoft Edge TTS.', requires:['openai'] },
-  { stt:'sarvam',   tts:'sarvam',  llm:'ollama',  label:'Sarvam AI + Ollama/Groq', desc:'Indian-made Sarvam AI (saarika STT + bulbul TTS) with Ollama or Groq LLM. Best for Indian languages.', requires:['sarvam'], featured:true },
+  { stt:'sarvam',   tts:'sarvam',  llm:'sarvam',  label:'Sarvam AI (Full Stack)', desc:'Indian-made Sarvam AI — saarika STT + bulbul TTS + Sarvam LLM. Best for Indian languages. Only SARVAM_API_KEY needed.', requires:['sarvam'], featured:true },
   { type:'inya', label:'inya.ai Agent', desc:'Full-stack Indian voice AI managed by inya.ai (by Gnani.ai). inya handles STT, TTS and LLM. Calls are initiated via inya and outcomes sync back here.', requires:['inya'], featured:true },
 ];
 
@@ -605,7 +605,7 @@ function renderAgent(el) {
             <select id="cfg-lang"><option value="hinglish">Hinglish (Hindi + English)</option><option value="hindi">Hindi</option><option value="english">English</option></select>
           </div>
           <div class="cfg-field"><label>Conversation Flow</label>
-            <select id="cfg-flow">
+            <select id="cfg-flow" onchange="updateFlowLabel(this)">
               <option value="full_collection">Full Loan Collection</option>
               <option value="short_reminder">Short Payment Reminder</option>
               <option value="simple_greeting">Simple Test / Greeting</option>
@@ -783,6 +783,12 @@ async function selectPipeline(idx) {
   if (activeFlowLabelEl) activeFlowLabelEl.textContent = ACTIVE_FLOW_LABEL;
   await api('/set-pipeline', { method:'POST', body: JSON.stringify({ stt:p.stt, tts:p.tts, llm:p.llm, config, flow_id }) });
   showLiveSession(p);
+}
+
+function updateFlowLabel(sel) {
+  ACTIVE_FLOW_LABEL = sel.options[sel.selectedIndex]?.text || sel.value;
+  const el = document.getElementById('active-flow-label');
+  if (el) el.textContent = ACTIVE_FLOW_LABEL;
 }
 
 function showLiveSession(p) {
