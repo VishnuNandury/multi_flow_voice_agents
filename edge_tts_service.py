@@ -177,9 +177,13 @@ class EdgeTTSService(TTSService):
         return b"".join(pcm_chunks)
     
     async def run_tts(self, text: str, *args, **kwargs) -> AsyncGenerator[Frame, None]:
-        # Strip XML/angle-bracket wrappers that some LLMs (Groq/llama) emit
+        # Strip function-call tokens and XML wrappers that LLMs (Groq/llama) emit
         import re
-        text = re.sub(r'</?[a-zA-Z][a-zA-Z0-9_-]{0,20}(?:\s[^>]{0,100})?/?>', '', text)
+        text = re.sub(r'<function=[^>]*>.*?</function>', '', text, flags=re.DOTALL)
+        text = re.sub(r'<function=[^>]*>\s*\{[^}]*\}', '', text)
+        text = re.sub(r'</?function[^>]*>', '', text)
+        text = re.sub(r'\(function=[^)>]*>[^(]*', '', text)
+        text = re.sub(r'</?[a-zA-Z][a-zA-Z0-9_-]{0,15}(?:\s[^>]{0,80})?/?>', '', text)
         text = re.sub(r'^<[^/][^>]*>', '', text.strip())
         text = re.sub(r'</[^>]*>$', '', text.strip())
         text = text.strip()

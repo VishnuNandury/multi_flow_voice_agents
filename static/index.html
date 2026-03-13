@@ -385,6 +385,7 @@ const PIPELINES = [
   { type:'inya', label:'inya.ai Agent', desc:'Full-stack Indian voice AI managed by inya.ai (by Gnani.ai). inya handles STT, TTS and LLM. Calls are initiated via inya and outcomes sync back here.', requires:['inya'], featured:true },
 ];
 
+let ACTIVE_FLOW_LABEL = 'Full Loan Collection';
 let FLOW_NODES = [
   {id:'greeting',label:'Greeting'},{id:'overdue_info',label:'Overdue Info'},
   {id:'understand_situation',label:'Situation'},{id:'payment_options',label:'Options'},
@@ -628,7 +629,10 @@ function renderAgent(el) {
       <div style="margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
           <h4 style="margin:0">Conversation Flow</h4>
-          <span style="font-size:.62rem;color:var(--faint);background:rgba(99,102,241,.08);border:1px solid var(--border);border-radius:6px;padding:.15rem .5rem">read-only · PipeCat Flows</span>
+          <div style="display:flex;align-items:center;gap:.5rem">
+            <span id="active-flow-label" style="font-size:.65rem;font-weight:600;color:var(--accent)">${ACTIVE_FLOW_LABEL}</span>
+            <span style="font-size:.62rem;color:var(--faint);background:rgba(99,102,241,.08);border:1px solid var(--border);border-radius:6px;padding:.15rem .5rem">read-only · PipeCat Flows</span>
+          </div>
         </div>
         ${buildFlowStageList()}
       </div>
@@ -771,7 +775,12 @@ async function selectPipeline(idx) {
     overdue_months: document.getElementById('cfg-months')?.value || '2',
     account_number: document.getElementById('cfg-account')?.value || 'QF-2024-78432',
   };
-  const flow_id = document.getElementById('cfg-flow')?.value || 'full_collection';
+  const flow_el = document.getElementById('cfg-flow');
+  const flow_id = flow_el?.value || 'full_collection';
+  // Update the read-only flow label to reflect the selected flow
+  ACTIVE_FLOW_LABEL = flow_el?.options[flow_el.selectedIndex]?.text || flow_id;
+  const activeFlowLabelEl = document.getElementById('active-flow-label');
+  if (activeFlowLabelEl) activeFlowLabelEl.textContent = ACTIVE_FLOW_LABEL;
   await api('/set-pipeline', { method:'POST', body: JSON.stringify({ stt:p.stt, tts:p.tts, llm:p.llm, config, flow_id }) });
   showLiveSession(p);
 }

@@ -416,6 +416,13 @@ def create_greeting_node(cfg: dict) -> NodeConfig:
             session_data[_pc]["outcome"] = "wrong_person"
         return "Wrong person on the line", create_wrong_person_end_node(cfg)
 
+    # Use respond_immediately=False + tts_say so the LLM is ONLY called after
+    # user responds.  Without this, Groq/llama eagerly calls confirm_identity
+    # during the greeting itself (before user speaks), skipping all intermediate nodes.
+    greeting_text = (
+        f"Namaste, kya main {bname} ji se baat kar rahi hoon? "
+        f"Main {aname} bol rahi hoon, {cname} ki taraf se."
+    )
     return NodeConfig(
         name="greeting",
         role_messages=[role_msg],
@@ -423,15 +430,16 @@ def create_greeting_node(cfg: dict) -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    f"Greet warmly in Hinglish. Say something like: "
-                    f'"Namaste, kya main {bname} ji se baat kar rahi hoon? '
-                    f'Main {aname} bol rahi hoon, {cname} ki taraf se."\n\n'
-                    f"Wait for their response. Use confirm_identity if they confirm "
-                    f"(even partially), or wrong_person if they deny.\n\n"
+                    f"The borrower has just been greeted. Listen to their response.\n"
+                    f"If they confirm they are {bname} or say 'haan', 'ji', 'yes', "
+                    f"or anything indicating they are the right person, call confirm_identity.\n"
+                    f"If they deny or say they are someone else, call wrong_person.\n\n"
                     f"{info}"
                 ),
             }
         ],
+        pre_actions=[{"type": "tts_say", "text": greeting_text}],
+        respond_immediately=False,
         functions=[
             FlowsFunctionSchema(
                 name="confirm_identity",
@@ -1167,20 +1175,30 @@ def create_stt(stt_type: str):
 
 
 def _clean_tts_text(text: str) -> str:
-    """Strip XML/angle-bracket wrapping that some LLMs (Groq/llama) emit.
+    """Strip XML/angle-bracket wrapping and function-call tokens that LLMs (Groq/llama) emit.
 
-    Groq's llama models sometimes wrap responses in pseudo-XML like:
-        <Rajesh Kumar ji, ...>content</Rajesh Kumar ji, ...?>
-    The TTS service would speak the literal '<' and '>' characters.
-    This strips those outer wrappers while preserving the spoken content.
+    Patterns handled:
+      <function=name>{...}</function>   — llama tool-call in text stream
+      <function=name>{}                 — standalone token
+      </function>                       — orphan closing tag
+      (function=name>{}                 — parenthesis variant
+      <b>, <br/>, </span>              — standard HTML tags (short names)
+      <Long sentence here>...</...>    — long outer wrapper (llama quirk)
     """
     import re
-    # Remove standard HTML/XML tags: <b>, <br/>, </span>, etc. (short tag names only)
-    text = re.sub(r'</?[a-zA-Z][a-zA-Z0-9_-]{0,20}(?:\s[^>]{0,100})?/?>', '', text)
-    # Remove outer wrapping if entire text looks like <...content...</...>
-    # (tag "names" are long sentences — a llama-specific quirk)
-    text = re.sub(r'^<[^/][^>]*>', '', text.strip())   # remove opening <...> at start
-    text = re.sub(r'</[^>]*>$', '', text.strip())       # remove closing </...> at end
+    # 1. Remove complete <function=...>...</function> blocks (including multiline)
+    text = re.sub(r'<function=[^>]*>.*?</function>', '', text, flags=re.DOTALL)
+    # 2. Remove standalone <function=name>{...} tokens
+    text = re.sub(r'<function=[^>]*>\s*\{[^}]*\}', '', text)
+    # 3. Remove remaining <function=...> opening tags and </function> closing tags
+    text = re.sub(r'</?function[^>]*>', '', text)
+    # 4. Remove (function=...) parenthesis variant
+    text = re.sub(r'\(function=[^)>]*>[^(]*', '', text)
+    # 5. Remove standard short HTML tags: <b>, <br/>, </span class="x">, etc.
+    text = re.sub(r'</?[a-zA-Z][a-zA-Z0-9_-]{0,15}(?:\s[^>]{0,80})?/?>', '', text)
+    # 6. Strip outer long pseudo-XML wrapper (llama wraps entire sentence in <...>...</...>)
+    text = re.sub(r'^<[^/][^>]*>', '', text.strip())
+    text = re.sub(r'</[^>]*>$', '', text.strip())
     return text.strip()
 
 
@@ -1190,8 +1208,23 @@ class _SarvamV3TTSService(SarvamHttpTTSService):
     only accepts temperature. This subclass overrides run_tts with the correct
     v3 payload so we can use bulbul:v3 + priya voice."""
 
+    # Sarvam API limit is ~1000 chars; longer text causes ContentLengthError
+    _SARVAM_MAX_CHARS = 900
+
     async def run_tts(self, text: str):
         text = _clean_tts_text(text)
+        if not text:
+            return
+        if len(text) > self._SARVAM_MAX_CHARS:
+            logger.warning(f"Sarvam TTS: truncating {len(text)}-char text to {self._SARVAM_MAX_CHARS}")
+            # Truncate at last sentence boundary before the limit
+            truncated = text[:self._SARVAM_MAX_CHARS]
+            for sep in ("।", ".", "!", "?"):
+                idx = truncated.rfind(sep)
+                if idx > self._SARVAM_MAX_CHARS // 2:
+                    truncated = truncated[:idx + 1]
+                    break
+            text = truncated
         from pipecat.services.sarvam._sdk import sdk_headers
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
