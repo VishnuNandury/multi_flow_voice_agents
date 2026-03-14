@@ -1093,7 +1093,7 @@ def _collect_prewarm_texts(cfg: dict, flow_id: str) -> list:
     texts = []
     for creator in node_creators:
         node = creator(cfg)
-        for action in (node.pre_actions or []):
+        for action in (node.get("pre_actions") or []):
             if action.get("type") == "tts_say" and action.get("text"):
                 texts.append(action["text"])
     return texts
