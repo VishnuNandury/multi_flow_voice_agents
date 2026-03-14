@@ -193,47 +193,91 @@ class EdgeTTSService(TTSService):
         
         try:
             await self.start_ttfb_metrics()
-            
+
             communicate = edge_tts.Communicate(
                 text=text,
                 voice=self._voice_id,
                 rate=self._rate,
                 pitch=self._pitch,
             )
-            
-            # Collect ALL MP3 data first (critical for proper decoding)
+
+            # Stream MP3 chunks and decode progressively.
+            # edge-tts sends audio over WebSocket in bursts — we accumulate in
+            # a bytearray but attempt a partial decode every DECODE_INTERVAL bytes
+            # so the first PCM frames can be yielded before the full download.
+            DECODE_INTERVAL = 12_000   # ~0.4 s of 128 kbps MP3
             mp3_buffer = bytearray()
+            pcm_queue: list[bytes] = []
+            ttfb_done = False
+            decoded_up_to = 0
+
             async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    mp3_buffer.extend(chunk["data"])
-            
+                if chunk["type"] != "audio":
+                    continue
+                mp3_buffer.extend(chunk["data"])
+
+                # Try a partial decode once we have a new DECODE_INTERVAL chunk
+                if len(mp3_buffer) - decoded_up_to >= DECODE_INTERVAL:
+                    try:
+                        partial_pcm = self._decode_mp3_to_pcm(bytes(mp3_buffer))
+                        # Only yield the newly decoded portion
+                        if len(partial_pcm) > sum(len(p) for p in pcm_queue):
+                            new_pcm = partial_pcm[sum(len(p) for p in pcm_queue):]
+                            pcm_queue.append(new_pcm)
+                            decoded_up_to = len(mp3_buffer)
+                            if not ttfb_done:
+                                await self.stop_ttfb_metrics()
+                                await self.start_tts_usage_metrics(text)
+                                yield TTSStartedFrame()
+                                ttfb_done = True
+                            chunk_size = 8192
+                            offset = 0
+                            while offset < len(new_pcm):
+                                end = min(offset + chunk_size, len(new_pcm))
+                                yield TTSAudioRawFrame(
+                                    audio=new_pcm[offset:end],
+                                    sample_rate=self.sample_rate,
+                                    num_channels=1,
+                                )
+                                offset = end
+                    except Exception:
+                        pass  # partial MP3 decode failed — wait for more data
+
             if not mp3_buffer:
                 logger.warning("Edge TTS returned no audio")
                 yield ErrorFrame("Edge TTS returned no audio")
                 return
-            
-            # Decode MP3 to PCM in one shot
-            pcm_data = self._decode_mp3_to_pcm(bytes(mp3_buffer))
-            
-            await self.stop_ttfb_metrics()
-            await self.start_tts_usage_metrics(text)
-            
-            yield TTSStartedFrame()
-            
-            # Stream PCM in chunks (use larger chunks for smoother playback)
-            chunk_size = 8192  # Increased from default
-            offset = 0
-            while offset < len(pcm_data):
-                end = min(offset + chunk_size, len(pcm_data))
-                yield TTSAudioRawFrame(
-                    audio=pcm_data[offset:end],
-                    sample_rate=self.sample_rate,
-                    num_channels=1,
-                )
-                offset = end
-            
+
+            # Final decode: pick up any remaining PCM not yet yielded
+            try:
+                full_pcm = self._decode_mp3_to_pcm(bytes(mp3_buffer))
+            except Exception as e:
+                logger.error(f"Edge TTS final decode error: {e}")
+                yield ErrorFrame(f"Edge TTS decode error: {e}")
+                return
+
+            already_yielded = sum(len(p) for p in pcm_queue)
+            remaining = full_pcm[already_yielded:]
+
+            if not ttfb_done:
+                await self.stop_ttfb_metrics()
+                await self.start_tts_usage_metrics(text)
+                yield TTSStartedFrame()
+
+            if remaining:
+                chunk_size = 8192
+                offset = 0
+                while offset < len(remaining):
+                    end = min(offset + chunk_size, len(remaining))
+                    yield TTSAudioRawFrame(
+                        audio=remaining[offset:end],
+                        sample_rate=self.sample_rate,
+                        num_channels=1,
+                    )
+                    offset = end
+
             yield TTSStoppedFrame()
-            
+
         except Exception as e:
             logger.error(f"Edge TTS error: {e}", exc_info=True)
             yield ErrorFrame(f"Edge TTS error: {e}")

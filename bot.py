@@ -431,10 +431,9 @@ def create_greeting_node(cfg: dict) -> NodeConfig:
                 "role": "system",
                 "content": (
                     f"The borrower has just been greeted. Listen to their response.\n"
-                    f"If they confirm they are {bname} or say 'haan', 'ji', 'yes', "
-                    f"or anything indicating they are the right person, call confirm_identity.\n"
-                    f"If they deny or say they are someone else, call wrong_person.\n\n"
-                    f"{info}"
+                    f"If they confirm they are {bname} (say haan/ji/yes/name), call confirm_identity.\n"
+                    f"If they deny, call wrong_person.\n"
+                    f"IMPORTANT: Do NOT generate any text. ONLY call the function."
                 ),
             }
         ],
@@ -479,10 +478,9 @@ def create_overdue_info_node(cfg: dict) -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    f"The borrower has been informed about their overdue EMIs. "
-                    f"Listen to their response. When they respond in any way "
-                    f"(acknowledgement, question, or anything else), call borrower_responds.\n\n"
-                    f"{info}"
+                    f"Borrower has heard the overdue info and responded. "
+                    f"Call borrower_responds now. "
+                    f"IMPORTANT: Do NOT generate any text. ONLY call the function."
                 ),
             }
         ],
@@ -521,10 +519,9 @@ def create_situation_node(cfg: dict) -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    f"The borrower has been asked about their situation. "
-                    f"Listen empathetically to their response. "
-                    f"When they share any reason (financial difficulty, job loss, health issue, etc.), "
-                    f"call record_situation with a brief summary of their reason."
+                    f"The borrower has shared their reason for the delay. "
+                    f"Call record_situation with a one-sentence summary of their reason. "
+                    f"IMPORTANT: Do NOT generate any text. ONLY call the function."
                 ),
             }
         ],
@@ -590,12 +587,12 @@ def create_payment_options_node(cfg: dict) -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    f"The borrower has been presented with payment options. "
-                    f"Listen to their choice and call the matching function:\n"
-                    f"- select_full_payment: if they agree to full Rs. {total}\n"
-                    f"- select_split_payment: if they want Rs. {emi} now + rest in 15 days\n"
-                    f"- select_partial_plan: if they want Rs. 4,000 now + installments\n"
-                    f"- request_callback: if they want a senior representative callback"
+                    f"The borrower chose a payment option. Call the matching function:\n"
+                    f"- select_full_payment: full Rs. {total}\n"
+                    f"- select_split_payment: Rs. {emi} now + rest in 15 days\n"
+                    f"- select_partial_plan: Rs. 4,000 now + installments\n"
+                    f"- request_callback: wants senior callback\n"
+                    f"IMPORTANT: Do NOT generate any text. ONLY call the function."
                 ),
             }
         ],
@@ -655,8 +652,9 @@ def create_commitment_node(cfg: dict) -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    f"The borrower has been asked for a payment date. "
-                    f"When they provide a specific date or timeframe, call confirm_commitment with that date."
+                    f"The borrower gave a payment date. "
+                    f"Call confirm_commitment with that date. "
+                    f"IMPORTANT: Do NOT generate any text. ONLY call the function."
                 ),
             }
         ],
@@ -710,9 +708,10 @@ def create_promise_to_pay_node(cfg: dict) -> NodeConfig:
             {
                 "role": "system",
                 "content": (
-                    f"The borrower has been asked to confirm their Promise to Pay. "
-                    f"If they confirm (say yes / haan / theek hai / bilkul), call confirm_ptp. "
-                    f"If they want to change the plan, call revise_plan."
+                    f"The borrower responded to the PTP confirmation. "
+                    f"If they confirm (haan/yes/theek hai/bilkul), call confirm_ptp. "
+                    f"If they want to change, call revise_plan. "
+                    f"IMPORTANT: Do NOT generate any text. ONLY call the function."
                 ),
             }
         ],
@@ -831,9 +830,10 @@ def create_short_reminder_greeting_node(cfg: dict) -> NodeConfig:
         task_messages=[{
             "role": "system",
             "content": (
-                f"The borrower has just been greeted. Listen to their response.\n"
-                f"If they confirm they are {bname}, call confirm_identity.\n"
-                f"If they deny, call wrong_person.\n\n{info}"
+                f"Borrower responded to greeting. "
+                f"If they confirm they are {bname}, call confirm_identity. "
+                f"If they deny, call wrong_person. "
+                f"IMPORTANT: Do NOT generate any text. ONLY call the function."
             ),
         }],
         pre_actions=[{"type": "tts_say", "text": short_greeting_text}],
@@ -867,8 +867,8 @@ def _short_reminder_overdue_node(cfg: dict) -> NodeConfig:
         task_messages=[{
             "role": "system",
             "content": (
-                f"The borrower has been informed about their overdue EMIs. "
-                f"After any response, call acknowledge.\n\n{info}"
+                f"Borrower responded to overdue info. Call acknowledge. "
+                f"IMPORTANT: Do NOT generate any text. ONLY call the function."
             ),
         }],
         pre_actions=[{"type": "tts_say", "text": short_overdue_text}],
@@ -906,9 +906,10 @@ def _short_reminder_ptp_node(cfg: dict) -> NodeConfig:
         task_messages=[{
             "role": "system",
             "content": (
-                f"The borrower has been asked for a payment commitment. "
+                f"Borrower responded to payment date request. "
                 f"If they give a date, call confirm_ptp. "
-                f"If they need more time or a senior callback, call request_callback.\n\n{info}"
+                f"If they want a callback, call request_callback. "
+                f"IMPORTANT: Do NOT generate any text. ONLY call the function."
             ),
         }],
         pre_actions=[{"type": "tts_say", "text": short_ptp_text}],
