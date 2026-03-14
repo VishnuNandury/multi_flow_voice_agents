@@ -56,6 +56,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_response import LLMUserAggregatorParams
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
@@ -1067,6 +1068,36 @@ def set_active_flow(flow_id: str):
 
 _init_flow_catalog()  # must be called after all node-creator functions are defined
 
+
+def _collect_prewarm_texts(cfg: dict, flow_id: str) -> list:
+    """Return all pre_action TTS texts for a flow so they can be pre-warmed."""
+    flow_id = flow_id if flow_id in FLOW_CATALOG else "full_collection"
+    if flow_id == "full_collection":
+        node_creators = [
+            create_greeting_node,
+            create_overdue_info_node,
+            create_situation_node,
+            create_payment_options_node,
+            create_commitment_node,
+            create_promise_to_pay_node,
+        ]
+    elif flow_id == "short_reminder":
+        node_creators = [
+            create_short_reminder_greeting_node,
+            _short_reminder_overdue_node,
+            _short_reminder_ptp_node,
+        ]
+    else:
+        return []
+
+    texts = []
+    for creator in node_creators:
+        node = creator(cfg)
+        for action in (node.pre_actions or []):
+            if action.get("type") == "tts_say" and action.get("text"):
+                texts.append(action["text"])
+    return texts
+
 # ---------------------------------------------------------------------------
 # Echo suppression — observer-driven approach
 # ---------------------------------------------------------------------------
@@ -1205,10 +1236,10 @@ def create_stt(stt_type: str):
                 interim_results=True,
                 # VAD events let Deepgram signal speech start/end natively
                 vad_events=True,
-                # Endpointing: ms of silence before finalising utterance (lower = faster)
-                endpointing=300,
-                # If no speech detected for 1s after utterance, force final transcript
-                utterance_end_ms="1000",
+                # Endpointing: ms of silence before finalising utterance
+                endpointing=200,
+                # Backup: force final transcript after 500ms silence post-utterance
+                utterance_end_ms="500",
             ),
         )
 
@@ -1250,6 +1281,56 @@ class _SarvamV3TTSService(SarvamHttpTTSService):
     # Sarvam API limit is ~1000 chars; longer text causes ContentLengthError
     _SARVAM_MAX_CHARS = 900
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pcm_cache: dict = {}  # text -> PCM bytes
+
+    async def _fetch_pcm(self, text: str) -> bytes | None:
+        """Fetch PCM for text from Sarvam TTS API. Used by pre_warm."""
+        from pipecat.services.sarvam._sdk import sdk_headers
+        try:
+            payload = {
+                "text": text,
+                "target_language_code": self._settings["language"],
+                "speaker": self._voice_id,
+                "temperature": self._settings.get("temperature", 0.6),
+                "sample_rate": self.sample_rate,
+                "enable_preprocessing": self._settings["enable_preprocessing"],
+                "model": self._model_name,
+            }
+            headers = {
+                "api-subscription-key": self._api_key,
+                "Content-Type": "application/json",
+                **sdk_headers(),
+            }
+            async with self._session.post(
+                f"{self._base_url}/text-to-speech", json=payload, headers=headers
+            ) as response:
+                if response.status != 200:
+                    return None
+                data = await response.json()
+            audios = data.get("audios", [])
+            if not audios:
+                return None
+            raw = base64.b64decode(audios[0])
+            return raw[44:] if raw.startswith(b"RIFF") else raw
+        except Exception as e:
+            logger.debug(f"Sarvam pre-warm error: {e}")
+        return None
+
+    async def pre_warm(self, texts: list) -> None:
+        """Pre-generate PCM for each text and cache it."""
+        for text in texts:
+            if not text or text in self._pcm_cache:
+                continue
+            # Apply same truncation as run_tts
+            if len(text) > self._SARVAM_MAX_CHARS:
+                text = text[:self._SARVAM_MAX_CHARS]
+            pcm = await self._fetch_pcm(text)
+            if pcm:
+                self._pcm_cache[text] = pcm
+                logger.debug(f"Sarvam pre-warmed [{text[:50]}]")
+
     async def run_tts(self, text: str):
         text = _clean_tts_text(text)
         if not text:
@@ -1264,6 +1345,19 @@ class _SarvamV3TTSService(SarvamHttpTTSService):
                     truncated = truncated[:idx + 1]
                     break
             text = truncated
+
+        # --- Cache hit: serve pre-warmed PCM without API call ---
+        cached = self._pcm_cache.get(text)
+        if cached:
+            logger.debug(f"Sarvam cache HIT [{text[:50]}]")
+            await self.start_ttfb_metrics()
+            await self.stop_ttfb_metrics()
+            await self.start_tts_usage_metrics(text)
+            yield TTSStartedFrame()
+            yield TTSAudioRawFrame(audio=cached, sample_rate=self.sample_rate, num_channels=1)
+            yield TTSStoppedFrame()
+            return
+
         from pipecat.services.sarvam._sdk import sdk_headers
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
@@ -1299,6 +1393,8 @@ class _SarvamV3TTSService(SarvamHttpTTSService):
             audio_data = base64.b64decode(audios[0])
             if audio_data.startswith(b"RIFF"):
                 audio_data = audio_data[44:]
+            # Cache for repeated calls (e.g. same node replayed)
+            self._pcm_cache[text] = audio_data
             yield TTSAudioRawFrame(audio=audio_data, sample_rate=self.sample_rate, num_channels=1)
         except Exception as e:
             yield ErrorFrame(error=f"Error generating TTS: {e}", exception=e)
@@ -1438,9 +1534,25 @@ async def run_bot(
     tts = create_tts(tts_type, aiohttp_session=_sarvam_session)
     llm = create_llm(llm_type)
 
+    # Pre-warm TTS cache in the background so node opening texts play instantly.
+    # Runs concurrently while the bot greets the user (~5-8s window).
+    if hasattr(tts, "pre_warm"):
+        _prewarm_texts = _collect_prewarm_texts(cfg, flow_id)
+        if _prewarm_texts:
+            asyncio.create_task(tts.pre_warm(_prewarm_texts))
+            logger.info(f"TTS pre-warm started for {len(_prewarm_texts)} texts")
+
     # --- Context (empty — FlowManager populates it per node) ---
     context = OpenAILLMContext([])
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = llm.create_context_aggregator(
+        context,
+        user_params=LLMUserAggregatorParams(
+            # Default 0.5s buffer waits for late-arriving transcription frames.
+            # 0.1s is sufficient since Deepgram (endpointing=200ms) and Whisper
+            # (SileroVAD stop_secs=0.3s) both finalize quickly.
+            aggregation_timeout=0.1,
+        ),
+    )
 
     # --- Transcript capture processors ---
     user_capture = UserTranscriptCapture(pc_id)

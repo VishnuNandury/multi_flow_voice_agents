@@ -152,6 +152,7 @@ class EdgeTTSService(TTSService):
         self.set_voice(voice)
         self._rate = rate
         self._pitch = pitch
+        self._pcm_cache: dict = {}  # text -> PCM bytes (pre-warmed or previously generated)
     
     def can_generate_metrics(self) -> bool:
         return True
@@ -176,6 +177,36 @@ class EdgeTTSService(TTSService):
         container.close()
         return b"".join(pcm_chunks)
     
+    async def _fetch_pcm(self, text: str) -> bytes | None:
+        """Download full MP3 from Edge TTS and decode to PCM bytes. Used by pre_warm."""
+        try:
+            communicate = edge_tts.Communicate(
+                text=text, voice=self._voice_id, rate=self._rate, pitch=self._pitch,
+            )
+            mp3_buffer = bytearray()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    mp3_buffer.extend(chunk["data"])
+            if mp3_buffer:
+                return self._decode_mp3_to_pcm(bytes(mp3_buffer))
+        except Exception as e:
+            logger.debug(f"EdgeTTS _fetch_pcm error: {e}")
+        return None
+
+    async def pre_warm(self, texts: list) -> None:
+        """Pre-generate PCM for each text and store in cache.
+
+        Call this as a background task while the bot is greeting the user so
+        that all subsequent node opening texts are served from cache instantly.
+        """
+        for text in texts:
+            if not text or text in self._pcm_cache:
+                continue
+            pcm = await self._fetch_pcm(text)
+            if pcm:
+                self._pcm_cache[text] = pcm
+                logger.debug(f"EdgeTTS pre-warmed [{text[:50]}]")
+
     async def run_tts(self, text: str, *args, **kwargs) -> AsyncGenerator[Frame, None]:
         # Strip function-call tokens and XML wrappers that LLMs (Groq/llama) emit
         import re
@@ -189,8 +220,26 @@ class EdgeTTSService(TTSService):
         text = text.strip()
         if not text:
             return
+
+        # --- Cache hit: serve pre-warmed PCM without any API call ---
+        cached = self._pcm_cache.get(text)
+        if cached:
+            logger.debug(f"EdgeTTS cache HIT [{text[:50]}]")
+            await self.start_ttfb_metrics()
+            await self.stop_ttfb_metrics()
+            await self.start_tts_usage_metrics(text)
+            yield TTSStartedFrame()
+            chunk_size = 8192
+            offset = 0
+            while offset < len(cached):
+                end = min(offset + chunk_size, len(cached))
+                yield TTSAudioRawFrame(audio=cached[offset:end], sample_rate=self.sample_rate, num_channels=1)
+                offset = end
+            yield TTSStoppedFrame()
+            return
+
         logger.debug(f"EdgeTTS: Generating [{text[:50]}...]")
-        
+
         try:
             await self.start_ttfb_metrics()
 
@@ -258,6 +307,8 @@ class EdgeTTSService(TTSService):
 
             already_yielded = sum(len(p) for p in pcm_queue)
             remaining = full_pcm[already_yielded:]
+            # Store full PCM so repeated calls (e.g. same greeting) hit cache
+            self._pcm_cache[text] = full_pcm
 
             if not ttfb_done:
                 await self.stop_ttfb_metrics()
