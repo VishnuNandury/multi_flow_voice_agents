@@ -324,6 +324,10 @@ select.input{cursor:pointer}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
           Analytics
         </button>
+        <button class="nav-item" data-page="calltest" onclick="navigate('calltest')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.62 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+          Call Test
+        </button>
         <span class="nav-section" style="margin-top:.5rem">Account</span>
         <button class="nav-item" data-page="settings" onclick="navigate('settings')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -501,21 +505,26 @@ async function showApp() {
 // ═══════════════════════════════════════════════════════════════
 // Router
 // ═══════════════════════════════════════════════════════════════
-const PAGE_TITLES = { dashboard:'Dashboard', agent:'Voice Agent', conversations:'Conversations', customers:'Customers', campaigns:'Campaigns', analytics:'Analytics', settings:'Settings' };
+const PAGE_TITLES = { dashboard:'Dashboard', agent:'Voice Agent', conversations:'Conversations', customers:'Customers', campaigns:'Campaigns', analytics:'Analytics', calltest:'Call Test', settings:'Settings' };
 
 function navigate(page) {
-  if (!['dashboard','agent','conversations','customers','campaigns','analytics','settings'].includes(page)) page = 'dashboard';
+  if (!['dashboard','agent','conversations','customers','campaigns','analytics','calltest','settings'].includes(page)) page = 'dashboard';
   currentPage = page;
   location.hash = page;
   document.getElementById('page-title').textContent = PAGE_TITLES[page];
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
-  // If leaving agent page while in a call, clean up
+  // If leaving campaign page, stop campaign polling
   if (page !== 'campaigns' && _campaignPollTimer) { clearInterval(_campaignPollTimer); _campaignPollTimer = null; }
+  // If leaving agent page while in a call, clean up
   if (page !== 'agent' && activeCall) {
     document.getElementById('client-iframe')?.remove();
     activeCall = false;
+  }
+  // If leaving calltest while in a call, clean up
+  if (page !== 'calltest' && ctActive) {
+    endCallTest(true);
   }
   const content = document.getElementById('content');
   ({
@@ -525,6 +534,7 @@ function navigate(page) {
     customers: renderCustomers,
     campaigns: renderCampaigns,
     analytics: renderAnalytics,
+    calltest: renderCallTest,
     settings: renderSettings,
   }[page])(content);
 }
@@ -1279,6 +1289,204 @@ async function renderAnalytics(el) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// Call Test — minimal phone-style call UI
+// ═══════════════════════════════════════════════════════════════
+let ctActive = false;
+let ctTimerInterval = null;
+let ctSeconds = 0;
+let ctResultPollInterval = null;
+
+function renderCallTest(el) {
+  el.innerHTML = `
+  <style>
+    .ct-wrap{display:flex;gap:1.5rem;align-items:flex-start;flex-wrap:wrap}
+    .ct-config{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;min-width:260px;flex:0 0 260px}
+    .ct-config h3{font-size:.85rem;font-weight:600;margin-bottom:1rem;color:var(--text)}
+    .ct-field{margin-bottom:.75rem}
+    .ct-field label{display:block;font-size:.7rem;color:var(--muted);margin-bottom:.3rem}
+    .ct-field select,.ct-field input{width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.78rem}
+    .ct-start-btn{width:100%;padding:.55rem;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;margin-top:.5rem}
+    .ct-start-btn:hover{opacity:.9}
+    .ct-phone{flex:1;min-width:320px;max-width:560px}
+    .ct-phone-card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+    .ct-phone-header{background:linear-gradient(135deg,#1a2133,#1a1f35);padding:1.5rem 1.25rem 1rem;text-align:center}
+    .ct-avatar{width:56px;height:56px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:700;color:#fff;margin:0 auto .6rem}
+    .ct-agent-name{font-size:.95rem;font-weight:600;color:var(--text)}
+    .ct-call-status{font-size:.72rem;color:var(--muted);margin-top:.2rem}
+    .ct-timer{font-size:1.6rem;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;margin-top:.4rem;letter-spacing:.05em}
+    .ct-iframe-wrap{position:relative}
+    .ct-iframe-wrap iframe{width:100%;height:480px;border:none;display:block;background:var(--bg)}
+    .ct-end-btn{width:100%;padding:.8rem;background:#ef4444;color:#fff;border:none;font-size:.9rem;font-weight:700;cursor:pointer;letter-spacing:.04em;transition:background .15s}
+    .ct-end-btn:hover{background:#dc2626}
+    .ct-idle{padding:2rem 1.25rem;text-align:center;color:var(--muted);font-size:.8rem;line-height:1.7}
+    .ct-idle svg{display:block;margin:0 auto 1rem;opacity:.3;width:48px;height:48px;stroke:var(--text)}
+    .ct-result{padding:1.25rem;background:var(--bg)}
+    .ct-result h4{font-size:.85rem;font-weight:600;margin-bottom:.75rem}
+    .ct-result-row{display:flex;justify-content:space-between;font-size:.78rem;padding:.35rem 0;border-bottom:1px solid var(--border)}
+    .ct-result-row:last-child{border:none}
+    .ct-result-row span:first-child{color:var(--muted)}
+    .ct-result-actions{display:flex;gap:.5rem;margin-top:.75rem}
+    .ct-result-actions button{flex:1;padding:.45rem;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:.78rem;cursor:pointer}
+    .ct-result-actions button:first-child{background:var(--accent);color:#fff;border-color:var(--accent)}
+  </style>
+  <div class="ct-wrap">
+    <div class="ct-config" id="ct-config-panel">
+      <h3>Call Configuration</h3>
+      <div class="ct-field"><label>Pipeline</label>
+        <select id="ct-pipeline">
+          ${PIPELINES.filter(p=>!p.type).map((p,i)=>`<option value="${i}">${p.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="ct-field"><label>Conversation Flow</label>
+        <select id="ct-flow">
+          <option value="full_collection">Full Loan Collection</option>
+          <option value="short_reminder">Short Payment Reminder</option>
+          <option value="simple_greeting">Simple Test / Greeting</option>
+        </select>
+      </div>
+      <div class="ct-field"><label>Agent Name</label><input id="ct-agent" value="Priya"></div>
+      <div class="ct-field"><label>Borrower Name</label><input id="ct-borrower" value="Rajesh Kumar"></div>
+      <div class="ct-field"><label>Overdue EMIs</label><input id="ct-months" value="2" style="width:4rem;display:inline-block"> &nbsp;
+        <input id="ct-period" value="Dec 2025, Jan 2026" style="width:130px;display:inline-block">
+      </div>
+      <div class="ct-field"><label>EMI Amount (Rs.)</label><input id="ct-emi" value="5,280"></div>
+      <div class="ct-field"><label>Total Due (Rs.)</label><input id="ct-total" value="11,760"></div>
+      <button class="ct-start-btn" onclick="startCallTest()">Start Call</button>
+    </div>
+
+    <div class="ct-phone">
+      <div class="ct-phone-card">
+        <div class="ct-phone-header">
+          <div class="ct-avatar" id="ct-avatar">P</div>
+          <div class="ct-agent-name" id="ct-agent-label">Priya</div>
+          <div class="ct-call-status" id="ct-status">Ready to call</div>
+          <div class="ct-timer" id="ct-timer" style="display:none">0:00</div>
+        </div>
+        <div id="ct-phone-body">
+          <div class="ct-idle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.62 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+            </svg>
+            Configure the call on the left and click <strong>Start Call</strong>.<br>
+            Your microphone will connect automatically.<br><br>
+            The pipecat playground below shows live events during the call.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function startCallTest() {
+  const pipelineIdx = parseInt(document.getElementById('ct-pipeline').value);
+  const p = PIPELINES.filter(q=>!q.type)[pipelineIdx];
+  if (!p) return;
+
+  const agentName = document.getElementById('ct-agent').value || 'Priya';
+  const borrowerName = document.getElementById('ct-borrower').value || 'Rajesh Kumar';
+  const config = {
+    agent_name: agentName,
+    company_name: 'QuickFinance Ltd.',
+    language: 'hinglish',
+    borrower_name: borrowerName,
+    emi_amount: document.getElementById('ct-emi').value || '5,280',
+    total_due: document.getElementById('ct-total').value || '11,760',
+    overdue_months: document.getElementById('ct-months').value || '2',
+    overdue_period: document.getElementById('ct-period').value || 'Dec 2025, Jan 2026',
+    account_number: 'QF-2024-78432',
+  };
+  const flow_id = document.getElementById('ct-flow').value || 'full_collection';
+
+  await api('/set-pipeline', { method:'POST', body: JSON.stringify({ stt:p.stt, tts:p.tts, llm:p.llm, config, flow_id }) });
+
+  ctActive = true;
+  ctSeconds = 0;
+
+  // Update header
+  const initials = agentName.trim().split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+  document.getElementById('ct-avatar').textContent = initials;
+  document.getElementById('ct-agent-label').textContent = agentName;
+  document.getElementById('ct-status').textContent = 'Connecting…';
+  document.getElementById('ct-timer').style.display = 'none';
+
+  // Start timer after 1s
+  setTimeout(() => {
+    if (!ctActive) return;
+    document.getElementById('ct-status').textContent = `${p.stt.toUpperCase()} · ${p.tts.toUpperCase()} · ${p.llm.toUpperCase()}`;
+    const timerEl = document.getElementById('ct-timer');
+    if (timerEl) timerEl.style.display = 'block';
+    ctTimerInterval = setInterval(() => {
+      ctSeconds++;
+      const m = Math.floor(ctSeconds/60), s = ctSeconds%60;
+      const tel = document.getElementById('ct-timer');
+      if (tel) tel.textContent = `${m}:${s.toString().padStart(2,'0')}`;
+    }, 1000);
+  }, 1200);
+
+  // Swap body to iframe + end button
+  document.getElementById('ct-phone-body').innerHTML = `
+    <div class="ct-iframe-wrap">
+      <iframe id="ct-iframe" src="/client/" allow="microphone"></iframe>
+    </div>
+    <button class="ct-end-btn" onclick="endCallTest(false)">&#9660; End Call</button>`;
+
+  // Hide config panel on small screens
+  const cfg = document.getElementById('ct-config-panel');
+  if (cfg) cfg.style.opacity = '0.4';
+}
+
+function endCallTest(silent) {
+  if (!ctActive) return;
+  ctActive = false;
+  clearInterval(ctTimerInterval);
+  clearInterval(ctResultPollInterval);
+  ctTimerInterval = null;
+
+  const elapsed = ctSeconds;
+  const m = Math.floor(elapsed/60), s = elapsed%60;
+
+  if (!silent) {
+    document.getElementById('ct-status').textContent = 'Call ended';
+    document.getElementById('ct-timer').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+
+    document.getElementById('ct-phone-body').innerHTML = `
+      <div class="ct-result">
+        <h4>Call Summary</h4>
+        <div class="ct-result-row"><span>Duration</span><span>${m}m ${s}s</span></div>
+        <div class="ct-result-row" id="ctr-outcome"><span>Outcome</span><span style="color:var(--muted)">Fetching…</span></div>
+        <div class="ct-result-row" id="ctr-pipeline"><span>Pipeline</span><span>${document.getElementById('ct-status')?.textContent || '—'}</span></div>
+        <div class="ct-result-actions">
+          <button onclick="navigate('analytics')">View Analytics</button>
+          <button onclick="navigate('conversations')">Conversations</button>
+          <button onclick="renderCallTest(document.getElementById('content'))">New Call</button>
+        </div>
+      </div>`;
+
+    // Poll for the latest conversation outcome
+    let tries = 0;
+    ctResultPollInterval = setInterval(async () => {
+      tries++;
+      const r = await api('/api/conversations?page=1&limit=1');
+      const conv = r?.conversations?.[0];
+      if (conv && conv.outcome) {
+        clearInterval(ctResultPollInterval);
+        const outcomeEl = document.getElementById('ctr-outcome');
+        if (outcomeEl) {
+          const colors = { ptp:'var(--green)', callback:'var(--amber)', wrong_person:'var(--red)', incomplete:'var(--muted)', payment_confirmed:'var(--green)' };
+          outcomeEl.querySelector('span:last-child').textContent = conv.outcome.replace('_',' ').toUpperCase();
+          outcomeEl.querySelector('span:last-child').style.color = colors[conv.outcome] || 'var(--text)';
+        }
+      }
+      if (tries >= 10) clearInterval(ctResultPollInterval);
+    }, 2000);
+
+    // Restore config panel
+    const cfg = document.getElementById('ct-config-panel');
+    if (cfg) cfg.style.opacity = '1';
+  }
+}
+
 // Settings
 // ═══════════════════════════════════════════════════════════════
 async function renderSettings(el) {
